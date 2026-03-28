@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from session import Session
 from visualizer import plot_bucket_predict_rates
@@ -25,6 +26,18 @@ def build_bucket_predict_rates(sessions: list[Session]) -> dict:
     return {key: trues[key] / totals[key] for key in totals}
 
 
+def save_bucket_rates(bucket_rates: dict, filepath: str) -> None:
+    serializable = {f"{x},{y}": rate for (x, y), rate in bucket_rates.items()}
+    with open(filepath, "w") as f:
+        json.dump(serializable, f)
+
+
+def load_bucket_rates(filepath: str) -> dict:
+    with open(filepath) as f:
+        raw = json.load(f)
+    return {tuple(int(v) for v in key.split(",")): rate for key, rate in raw.items()}
+
+
 def smooth_bucket_rates(bucket_rates: dict) -> dict:
     smoothed = {}
     for (x, y) in bucket_rates:
@@ -39,16 +52,29 @@ def smooth_bucket_rates(bucket_rates: dict) -> dict:
     return smoothed
 
 
+BUCKET_RATES_CACHE = "data/bucket_rates.json"
+SMOOTHED_RATES_CACHE = "data/smoothed_rates.json"
+
 if __name__ == "__main__":
-    sessions = load_sessions("data/btc_polymarket_combined_20260325_134508_train.json")
+    if os.path.exists(BUCKET_RATES_CACHE) and os.path.exists(SMOOTHED_RATES_CACHE):
+        print("Loading bucket rates from cache...")
+        bucket_rates = load_bucket_rates(BUCKET_RATES_CACHE)
+        smoothed_rates = load_bucket_rates(SMOOTHED_RATES_CACHE)
+        print(f"Distinct buckets:  {len(bucket_rates)}")
+    else:
+        sessions = load_sessions("data/btc_polymarket_combined_20260325_134508_train.json")
+        total_rows = sum(len(s.rows) for s in sessions)
+        print(f"Sessions ingested: {len(sessions)}")
+        print(f"Rows ingested:     {total_rows}")
+        print()
 
-    total_rows = sum(len(s.rows) for s in sessions)
-    print(f"Sessions ingested: {len(sessions)}")
-    print(f"Rows ingested:     {total_rows}")
-    print()
+        bucket_rates = build_bucket_predict_rates(sessions)
+        smoothed_rates = smooth_bucket_rates(bucket_rates)
+        print(f"Distinct buckets:  {len(bucket_rates)}")
 
-    bucket_rates = build_bucket_predict_rates(sessions)
-    print(f"Distinct buckets:  {len(bucket_rates)}")
+        save_bucket_rates(bucket_rates, BUCKET_RATES_CACHE)
+        save_bucket_rates(smoothed_rates, SMOOTHED_RATES_CACHE)
+        print("Bucket rates saved to cache.")
     print()
 
     sample = random.sample(list(bucket_rates.items()), 25)
@@ -57,8 +83,6 @@ if __name__ == "__main__":
     print("-" * 36)
     for key, rate in sample:
         print(f"{str(key):<20} {rate * 100:.1f}%")
-
-    smoothed_rates = smooth_bucket_rates(bucket_rates)
 
     plot_bucket_predict_rates(bucket_rates, title="Raw — Predict True % per Bucket")
     plot_bucket_predict_rates(smoothed_rates, title="Smoothed — Predict True % per Bucket")

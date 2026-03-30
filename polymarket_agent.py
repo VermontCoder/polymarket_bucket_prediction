@@ -3,7 +3,6 @@ import time
 
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
-from py_clob_client.constants import POLYGON
 from py_clob_client.clob_types import MarketOrderArgs, OrderType, TradeParams
 from py_clob_client.order_builder.constants import BUY
 from datetime import datetime, timezone
@@ -269,7 +268,10 @@ def main():
         if fill is None:
             continue
 
-        run_countdown(end_dt)
+        try:
+            run_countdown(end_dt)
+        except Exception as e:
+            print(f"Countdown error: {e}")
 
         try:
             poll_resolution(client, condition_id, fill)

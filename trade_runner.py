@@ -47,7 +47,7 @@ def get_row_signal(row, smoothed_rates: dict):
         direction, ask_price = "DOWN", row.down_ask
 
     ttc = row.time_to_close
-    if ttc < 0 or ttc > 300000:
+    if ttc is None or ttc < 0 or ttc > 300000:
         return None
     if row.diff_pct is None:
         return None

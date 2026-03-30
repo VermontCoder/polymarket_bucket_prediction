@@ -119,9 +119,10 @@ def test_signal_null_diff_pct():
 
 
 def test_signal_ttc_too_large():
-    # time_to_close=400000 > 300000 → skip
+    # time_to_close=400000 > 300000 → TTC guard fires before bucket lookup
+    # x would be 200 if guard didn't fire; pass (200, 180) in dict to prove guard is the cause
     row = _row(up_ask=70.0, down_ask=30.0, diff_pct=0.1, time_to_close=400000)
-    assert get_row_signal(row, {}) is None
+    assert get_row_signal(row, {(200, 180): 0.99}) is None
 
 
 def test_signal_ttc_negative():

@@ -107,3 +107,28 @@ def test_calc_pnl_loss():
     payout, pnl = calc_pnl(shares=4.962, cost=2.69, won=False)
     assert payout == 0.0
     assert abs(pnl - (-2.69)) < 0.001
+
+
+def test_format_countdown_minutes_and_seconds():
+    from polymarket_agent import format_countdown
+    assert format_countdown(252) == "4m 12s"
+
+
+def test_format_countdown_seconds_only():
+    from polymarket_agent import format_countdown
+    assert format_countdown(45) == "45s"
+
+
+def test_format_countdown_zero():
+    from polymarket_agent import format_countdown
+    assert format_countdown(0) == "0s"
+
+
+def test_format_countdown_negative():
+    from polymarket_agent import format_countdown
+    assert format_countdown(-5) == "0s"
+
+
+def test_format_countdown_exact_minute():
+    from polymarket_agent import format_countdown
+    assert format_countdown(60) == "1m 0s"

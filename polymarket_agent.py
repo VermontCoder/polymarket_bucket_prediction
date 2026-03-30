@@ -75,3 +75,13 @@ def calc_pnl(shares: float, cost: float, won: bool) -> tuple:
     """Return (payout, pnl). Payout is $1.00/share if won, else $0."""
     payout = shares * 1.0 if won else 0.0
     return payout, payout - cost
+
+
+def format_countdown(seconds: int) -> str:
+    """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
+    if seconds <= 0:
+        return "0s"
+    m, s = divmod(int(seconds), 60)
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"

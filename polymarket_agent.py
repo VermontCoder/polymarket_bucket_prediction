@@ -61,3 +61,17 @@ def get_token_ids(market: dict) -> tuple:
             f"Could not find Yes/No tokens in market: {market.get('condition_id')}"
         )
     return up_id, down_id
+
+
+def calc_avg_fill_price(trades: list) -> float | None:
+    """Return weighted average fill price from trade records, or None if no trades."""
+    total_size = sum(float(t["size"]) for t in trades)
+    if total_size == 0:
+        return None
+    return sum(float(t["price"]) * float(t["size"]) for t in trades) / total_size
+
+
+def calc_pnl(shares: float, cost: float, won: bool) -> tuple:
+    """Return (payout, pnl). Payout is $1.00/share if won, else $0."""
+    payout = shares * 1.0 if won else 0.0
+    return payout, payout - cost

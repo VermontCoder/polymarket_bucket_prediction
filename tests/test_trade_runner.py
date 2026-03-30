@@ -244,3 +244,28 @@ def test_save_trade_log_writes_file(tmp_path):
         content = f.read()
     assert "outcome=UP" in content
     assert "2026-03-24T15:36:51.989Z" in content
+
+
+from trade_runner import print_summary
+
+
+def test_print_summary_counts(capsys):
+    results = [_sample_result(correct=True), _sample_result(correct=False)]
+    print_summary(results, total_sessions=10)
+    out = capsys.readouterr().out
+    assert "10" in out           # total sessions
+    assert "2  (20.0%)" in out   # trades taken out of 10
+    assert "1  (50.0%)" in out   # wins out of 2
+
+
+def test_print_summary_pnl(capsys):
+    results = [_sample_result(correct=True)]   # pnl = 4.97 - 2.55 = +$2.42
+    print_summary(results, total_sessions=5)
+    out = capsys.readouterr().out
+    assert "+$" in out
+
+
+def test_print_summary_no_trades(capsys):
+    print_summary([], total_sessions=10)
+    out = capsys.readouterr().out
+    assert "Trades taken:          0" in out

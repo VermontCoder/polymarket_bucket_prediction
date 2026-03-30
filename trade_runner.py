@@ -117,3 +117,23 @@ def print_trade_log(results: list) -> None:
 def save_trade_log(results: list, filepath: str) -> None:
     with open(filepath, "w") as f:
         f.write(_format_trade_log(results))
+
+
+def print_summary(results: list, total_sessions: int) -> None:
+    trades = len(results)
+    wins = sum(1 for r in results if r.correct)
+    losses = trades - wins
+    total_pnl = sum(r.pnl for r in results)
+    avg_pnl = total_pnl / trades if trades > 0 else 0.0
+    trade_pct = trades / total_sessions * 100 if total_sessions > 0 else 0.0
+    win_pct = wins / trades * 100 if trades > 0 else 0.0
+    loss_pct = losses / trades * 100 if trades > 0 else 0.0
+    pnl_str = f"+${total_pnl:.2f}" if total_pnl >= 0 else f"-${abs(total_pnl):.2f}"
+    avg_str = f"+${avg_pnl:.2f}" if avg_pnl >= 0 else f"-${abs(avg_pnl):.2f}"
+
+    print(f"Sessions in test set:  {total_sessions}")
+    print(f"Trades taken:          {trades}  ({trade_pct:.1f}%)")
+    print(f"  Correct (win):       {wins}  ({win_pct:.1f}%)")
+    print(f"  Incorrect (loss):    {losses}  ({loss_pct:.1f}%)")
+    print(f"Total P&L:             {pnl_str}")
+    print(f"Avg P&L per trade:     {avg_str}")

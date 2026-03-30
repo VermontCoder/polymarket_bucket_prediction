@@ -88,3 +88,30 @@ def run_session(session, smoothed_rates: dict):
             pnl=payout - cost,
         )
     return None
+
+
+def _format_trade_log(results: list) -> str:
+    header = f"  {'timestamp':<30} {'bucket':<14} {'ask':>5}  {'smoothed%':>9}  {'shares':>7}  {'cost':>7}  {'payout':>7}  {'pnl':>8}"
+    divider = f"  {'-' * 94}"
+    lines = []
+    for r in results:
+        pnl_str = f"+${r.pnl:.2f}" if r.pnl >= 0 else f"-${abs(r.pnl):.2f}"
+        lines.append(f"Session: {r.session_id}  outcome={r.outcome}  traded={r.direction}")
+        lines.append(header)
+        lines.append(divider)
+        lines.append(
+            f"  {r.row_timestamp:<30} {str(r.bucket):<14} {r.ask_price:>5.1f}"
+            f"  {r.smoothed_rate * 100:>8.1f}%  {r.shares_bought:>7.3f}"
+            f"  ${r.cost:.2f}  ${r.payout:.2f}  {pnl_str:>8}"
+        )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def print_trade_log(results: list) -> None:
+    print(_format_trade_log(results))
+
+
+def save_trade_log(results: list, filepath: str) -> None:
+    with open(filepath, "w") as f:
+        f.write(_format_trade_log(results))

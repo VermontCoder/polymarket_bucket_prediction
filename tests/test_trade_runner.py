@@ -205,3 +205,42 @@ def test_run_session_stops_at_first_trade():
     rates = {(60, 180): 0.82, (50, 210): 0.95}
     result = run_session(s, rates)
     assert result.row_timestamp == "2026-01-01T00:00:01Z"
+
+
+from trade_runner import print_trade_log, save_trade_log
+
+
+def _sample_result(correct=True):
+    cost = 2.55
+    payout = 4.97 if correct else 0.0
+    return TradeResult(
+        session_id="2026-03-24T15:35:00Z",
+        outcome="UP", direction="UP", correct=correct,
+        row_timestamp="2026-03-24T15:36:51.989Z",
+        bucket=(94, 160), ask_price=51.0, smoothed_rate=0.641,
+        shares_bought=4.974, cost=cost, payout=payout, pnl=payout - cost,
+    )
+
+
+def test_print_trade_log_contains_key_fields(capsys):
+    print_trade_log([_sample_result()])
+    out = capsys.readouterr().out
+    assert "outcome=UP" in out
+    assert "traded=UP" in out
+    assert "2026-03-24T15:36:51.989Z" in out
+    assert "(94, 160)" in out
+
+
+def test_print_trade_log_negative_pnl(capsys):
+    print_trade_log([_sample_result(correct=False)])
+    out = capsys.readouterr().out
+    assert "-$" in out
+
+
+def test_save_trade_log_writes_file(tmp_path):
+    filepath = str(tmp_path / "trade_log.txt")
+    save_trade_log([_sample_result()], filepath)
+    with open(filepath) as f:
+        content = f.read()
+    assert "outcome=UP" in content
+    assert "2026-03-24T15:36:51.989Z" in content

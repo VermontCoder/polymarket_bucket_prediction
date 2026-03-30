@@ -256,13 +256,16 @@ def test_print_summary_counts(capsys):
     assert "10" in out           # total sessions
     assert "2  (20.0%)" in out   # trades taken out of 10
     assert "1  (50.0%)" in out   # wins out of 2
+    assert "Total P&L:             -$0.13" in out
+    assert "Avg P&L per trade:     -$0.06" in out
 
 
 def test_print_summary_pnl(capsys):
     results = [_sample_result(correct=True)]   # pnl = 4.97 - 2.55 = +$2.42
     print_summary(results, total_sessions=5)
     out = capsys.readouterr().out
-    assert "+$" in out
+    assert "Total P&L:             +$2.42" in out
+    assert "Avg P&L per trade:     +$2.42" in out
 
 
 def test_print_summary_no_trades(capsys):

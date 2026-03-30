@@ -23,7 +23,10 @@ def find_btc_5min_market(markets: list) -> dict | None:
             continue
         if not any(kw in q for kw in ("5 min", "5-min", "5 minute")):
             continue
-        end = datetime.fromisoformat(m["end_date_iso"].replace("Z", "+00:00"))
+        try:
+            end = datetime.fromisoformat(m["end_date_iso"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
         if end > now:
             candidates.append((end, m))
     if not candidates:
@@ -42,8 +45,16 @@ def get_token_ids(market: dict) -> tuple:
     down_id = None
     for token in market["tokens"]:
         if token["outcome"] == "Yes":
+            if up_id is not None:
+                raise ValueError(
+                    f"Duplicate 'Yes' token in market: {market.get('condition_id')}"
+                )
             up_id = token["token_id"]
         elif token["outcome"] == "No":
+            if down_id is not None:
+                raise ValueError(
+                    f"Duplicate 'No' token in market: {market.get('condition_id')}"
+                )
             down_id = token["token_id"]
     if up_id is None or down_id is None:
         raise ValueError(

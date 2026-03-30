@@ -92,17 +92,19 @@ def run_session(session, smoothed_rates: dict):
 
 def _format_trade_log(results: list) -> str:
     header = f"  {'timestamp':<30} {'bucket':<14} {'ask':>5}  {'smoothed%':>9}  {'shares':>7}  {'cost':>7}  {'payout':>7}  {'pnl':>8}"
-    divider = f"  {'-' * 94}"
+    divider = f"  {'-' * 99}"
     lines = []
     for r in results:
         pnl_str = f"+${r.pnl:.2f}" if r.pnl >= 0 else f"-${abs(r.pnl):.2f}"
+        cost_str = f"${r.cost:.2f}"
+        payout_str = f"${r.payout:.2f}"
         lines.append(f"Session: {r.session_id}  outcome={r.outcome}  traded={r.direction}")
         lines.append(header)
         lines.append(divider)
         lines.append(
             f"  {r.row_timestamp:<30} {str(r.bucket):<14} {r.ask_price:>5.1f}"
             f"  {r.smoothed_rate * 100:>8.1f}%  {r.shares_bought:>7.3f}"
-            f"  ${r.cost:.2f}  ${r.payout:.2f}  {pnl_str:>8}"
+            f"  {cost_str:>7}  {payout_str:>7}  {pnl_str:>8}"
         )
         lines.append("")
     return "\n".join(lines)

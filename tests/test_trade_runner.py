@@ -131,6 +131,39 @@ def test_signal_ttc_negative():
     assert get_row_signal(row, {}) is None
 
 
+def test_signal_contrarian_fires():
+    # up_ask=70 dominant; down_ask=30 minority; rate=0.20
+    # primary: 0.20 >= (70+10)/100=0.80 → NO
+    # contrarian: 0.80 >= (30+10)/100=0.40 → YES → buy DOWN
+    row = _row(up_ask=70.0, down_ask=30.0, diff_pct=0.1, time_to_close=120000)
+    result = get_row_signal(row, {(60, 180): 0.20})
+    assert result is not None
+    direction, ask, bucket, rate = result
+    assert direction == "DOWN"
+    assert ask == 30.0
+    assert abs(rate - 0.80) < 0.001  # effective_rate = 1 - smoothed_rate
+
+
+def test_signal_contrarian_below_threshold():
+    # rate=0.79; primary: 0.79 < 0.80 → NO; contrarian: 0.21 < 0.40 → NO
+    row = _row(up_ask=70.0, down_ask=30.0, diff_pct=0.1, time_to_close=120000)
+    assert get_row_signal(row, {(60, 180): 0.79}) is None
+
+
+def test_signal_primary_wins_tiebreak():
+    # up_ask=55, down_ask=45; threshold=10
+    # primary threshold: (55+10)/100=0.65
+    # contrarian threshold: (45+10)/100=0.55
+    # rate=0.70: primary margin=0.05, contrarian margin=(0.30-0.55)=-0.25 → primary only
+    row = _row(up_ask=55.0, down_ask=45.0, diff_pct=0.05, time_to_close=120000)
+    # y = clamp(int(0.05*300+150)) = clamp(165) = 165; x=60
+    result = get_row_signal(row, {(60, 165): 0.70})
+    assert result is not None
+    direction, ask, bucket, rate = result
+    assert direction == "UP"
+    assert ask == 55.0
+
+
 from session import Session
 from trade_runner import run_session
 

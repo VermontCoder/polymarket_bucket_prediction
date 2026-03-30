@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from main import load_sessions, load_bucket_rates
+
 
 @dataclass
 class TradeResult:
@@ -137,3 +139,26 @@ def print_summary(results: list, total_sessions: int) -> None:
     print(f"  Incorrect (loss):    {losses}  ({loss_pct:.1f}%)")
     print(f"Total P&L:             {pnl_str}")
     print(f"Avg P&L per trade:     {avg_str}")
+
+
+TEST_DATA = "data/btc_polymarket_combined_20260325_134508_test.json"
+SMOOTHED_RATES_CACHE = "data/smoothed_rates.json"
+TRADE_LOG_PATH = "data/trade_log.txt"
+
+if __name__ == "__main__":
+    smoothed_rates = load_bucket_rates(SMOOTHED_RATES_CACHE)
+    sessions = load_sessions(TEST_DATA)
+    print(f"Test sessions loaded:  {len(sessions)}")
+    print()
+
+    results = []
+    for session in sessions:
+        result = run_session(session, smoothed_rates)
+        if result is not None:
+            results.append(result)
+
+    print_trade_log(results)
+    save_trade_log(results, TRADE_LOG_PATH)
+    print(f"Trade log saved to {TRADE_LOG_PATH}")
+    print()
+    print_summary(results, total_sessions=len(sessions))

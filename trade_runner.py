@@ -26,3 +26,38 @@ def calc_shares(ask_price: float) -> float:
     fee_per_share = 0.02 * ask_price * (1 - ask_price / 100)
     budget = 5 * ask_price
     return budget / (ask_price + fee_per_share)
+
+
+def get_row_signal(row, smoothed_rates: dict):
+    """Return (direction, ask_price, bucket, smoothed_rate) if a trade signal fires, else None.
+
+    Fires when smoothed_rate >= (dominant_ask + 10) / 100.
+    dominant_ask = whichever of up_ask / down_ask is strictly higher.
+    """
+    if row.up_ask is None or row.down_ask is None:
+        return None
+    if row.up_ask == row.down_ask:
+        return None
+
+    if row.up_ask > row.down_ask:
+        direction, ask_price = "UP", row.up_ask
+    else:
+        direction, ask_price = "DOWN", row.down_ask
+
+    ttc = row.time_to_close
+    if ttc < 0 or ttc > 300000:
+        return None
+    if row.diff_pct is None:
+        return None
+
+    x = ttc // 2000
+    y = max(0, min(299, int(row.diff_pct * 300 + 150)))
+    bucket = (x, y)
+
+    if bucket not in smoothed_rates:
+        return None
+
+    smoothed_rate = smoothed_rates[bucket]
+    if smoothed_rate >= (ask_price + 10) / 100:
+        return direction, ask_price, bucket, smoothed_rate
+    return None

@@ -128,3 +128,80 @@ def test_signal_ttc_negative():
     # time_to_close=-1 < 0 → skip
     row = _row(up_ask=70.0, down_ask=30.0, diff_pct=0.1, time_to_close=-1)
     assert get_row_signal(row, {}) is None
+
+
+from session import Session
+from trade_runner import run_session
+
+
+def _row_dict(up_ask, down_ask, diff_pct, time_to_close, timestamp="2026-01-01T00:00:00Z"):
+    return {
+        "timestamp": timestamp,
+        "up_bid": None, "up_ask": up_ask,
+        "down_bid": None, "down_ask": down_ask,
+        "current_price": 50.0,
+        "diff_pct": diff_pct, "diff_usd": None,
+        "time_to_close": time_to_close,
+    }
+
+
+def _session(outcome, rows_dicts):
+    return Session({
+        "session_id": "test-session",
+        "outcome": outcome,
+        "hour": 12, "day": 1,
+        "diff_pct_prev_session": None,
+        "diff_pct_hour": None,
+        "avg_pct_variance_hour": None,
+        "rows": rows_dicts,
+    })
+
+
+def test_run_session_returns_trade_result():
+    # up_ask=70, bucket=(60,180), rate=0.82, threshold=0.80 → fires
+    s = _session("UP", [_row_dict(70.0, 30.0, 0.1, 120000)])
+    result = run_session(s, {(60, 180): 0.82})
+    assert result is not None
+    assert result.direction == "UP"
+    assert result.outcome == "UP"
+    assert result.correct is True
+    assert result.bucket == (60, 180)
+    assert result.ask_price == 70.0
+
+
+def test_run_session_correct_pnl():
+    # cost = 5*70/100 = $3.50; shares = calc_shares(70); payout = shares*1.00
+    s = _session("UP", [_row_dict(70.0, 30.0, 0.1, 120000)])
+    result = run_session(s, {(60, 180): 0.82})
+    fee = 0.02 * 70 * (1 - 70 / 100)
+    expected_shares = 350 / (70 + fee)
+    assert abs(result.shares_bought - expected_shares) < 0.001
+    assert abs(result.cost - 3.50) < 0.001
+    assert abs(result.payout - expected_shares) < 0.001
+    assert abs(result.pnl - (expected_shares - 3.50)) < 0.001
+
+
+def test_run_session_incorrect_pnl():
+    # direction=UP but outcome=DOWN → payout=0, pnl=-(cost)
+    s = _session("DOWN", [_row_dict(70.0, 30.0, 0.1, 120000)])
+    result = run_session(s, {(60, 180): 0.82})
+    assert result.correct is False
+    assert result.payout == 0.0
+    assert abs(result.pnl - (-3.50)) < 0.001
+
+
+def test_run_session_no_signal_returns_none():
+    # rate=0.75 < threshold=0.80 → no trade
+    s = _session("UP", [_row_dict(70.0, 30.0, 0.1, 120000)])
+    assert run_session(s, {(60, 180): 0.75}) is None
+
+
+def test_run_session_stops_at_first_trade():
+    # Two rows both eligible — only the first should be taken
+    row1 = _row_dict(70.0, 30.0, 0.1, 120000, timestamp="2026-01-01T00:00:01Z")
+    row2 = _row_dict(80.0, 20.0, 0.2, 100000, timestamp="2026-01-01T00:00:02Z")
+    s = _session("UP", [row1, row2])
+    # row1: bucket (60,180) threshold=0.80; row2: bucket (50,210) threshold=0.90
+    rates = {(60, 180): 0.82, (50, 210): 0.95}
+    result = run_session(s, rates)
+    assert result.row_timestamp == "2026-01-01T00:00:01Z"

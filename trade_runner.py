@@ -61,3 +61,30 @@ def get_row_signal(row, smoothed_rates: dict):
     if smoothed_rate >= (ask_price + 10) / 100:
         return direction, ask_price, bucket, smoothed_rate
     return None
+
+
+def run_session(session, smoothed_rates: dict):
+    """Iterate a session's rows in order; return a TradeResult for the first signal, or None."""
+    for row in session.rows:
+        signal = get_row_signal(row, smoothed_rates)
+        if signal is None:
+            continue
+        direction, ask_price, bucket, smoothed_rate = signal
+        shares = calc_shares(ask_price)
+        cost = (5 * ask_price) / 100
+        payout = shares * 1.0 if direction == session.outcome else 0.0
+        return TradeResult(
+            session_id=session.session_id,
+            outcome=session.outcome,
+            direction=direction,
+            correct=(direction == session.outcome),
+            row_timestamp=row.timestamp,
+            bucket=bucket,
+            ask_price=ask_price,
+            smoothed_rate=smoothed_rate,
+            shares_bought=shares,
+            cost=cost,
+            payout=payout,
+            pnl=payout - cost,
+        )
+    return None

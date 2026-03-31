@@ -63,14 +63,12 @@ If no active market is found, print an error and exit.
 Active market: Will BTC be higher at 3:45 PM UTC?
 Closes in: 4m 12s
 
-1. Buy UP  (Yes)   — current price: 0.54
-2. Buy DOWN (No)   — current price: 0.46
+1. Buy UP  (Yes)
+2. Buy DOWN (No)
 3. Exit
 
 Choice:
 ```
-
-The current prices come from `token["price"]` in the market's `tokens` array.
 
 ---
 

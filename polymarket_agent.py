@@ -1,6 +1,8 @@
 import os
+import sys
 import time
 
+import requests
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import MarketOrderArgs, OrderType, TradeParams
@@ -8,48 +10,24 @@ from py_clob_client.order_builder.constants import BUY
 from datetime import datetime, timezone
 
 HOST = "https://clob.polymarket.com"
-
-
-def find_btc_5min_market(markets: list) -> dict | None:
-    """Return the active BTC 5-min market with the nearest future end_date_iso, or None."""
-    now = datetime.now(timezone.utc)
-    candidates = []
-    for m in markets:
-        if not (m.get("active") and not m.get("closed")):
-            continue
-        q = m.get("question", "").lower()
-        if not any(kw in q for kw in ("btc", "bitcoin")):
-            continue
-        if not any(kw in q for kw in ("5 min", "5-min", "5 minute")):
-            continue
-        try:
-            end = datetime.fromisoformat(m["end_date_iso"].replace("Z", "+00:00"))
-        except (KeyError, ValueError):
-            continue
-        if end > now:
-            candidates.append((end, m))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: x[0])
-    return candidates[0][1]
+GAMMA_API = "https://gamma-api.polymarket.com"
 
 
 def get_token_ids(market: dict) -> tuple:
     """Return (up_token_id, down_token_id).
 
-    UP = token with outcome 'Yes'. DOWN = token with outcome 'No'.
     Raises ValueError if either token is missing.
     """
     up_id = None
     down_id = None
     for token in market["tokens"]:
-        if token["outcome"] == "Yes":
+        if token["outcome"] == "Up":
             if up_id is not None:
                 raise ValueError(
                     f"Duplicate 'Yes' token in market: {market.get('condition_id')}"
                 )
             up_id = token["token_id"]
-        elif token["outcome"] == "No":
+        elif token["outcome"] == "Down":
             if down_id is not None:
                 raise ValueError(
                     f"Duplicate 'No' token in market: {market.get('condition_id')}"
@@ -90,27 +68,53 @@ def build_client() -> ClobClient:
     """Load credentials from .env, derive API creds, return fully authenticated ClobClient."""
     load_dotenv()
     pk = os.getenv("POLY_PRIVATE_KEY")
+    pfa = os.getenv("POLYMARKET_FUNDER_ADDRESS")
     chain_id_str = os.getenv("POLY_CHAIN_ID", "137")
     if not pk:
         raise EnvironmentError("POLY_PRIVATE_KEY not set in .env")
     chain_id = int(chain_id_str)
-    client = ClobClient(HOST, key=pk, chain_id=chain_id)
+    client = ClobClient(HOST, key=pk, chain_id=chain_id, signature_type=1, funder=pfa)
     creds = client.create_or_derive_api_creds()
     client.set_api_creds(creds)
     return client
 
 
-def fetch_all_markets(client: ClobClient) -> list:
-    """Paginate get_markets() until end cursor, return all market dicts."""
-    markets = []
-    cursor = "MA=="
-    while True:
-        resp = client.get_markets(next_cursor=cursor)
-        markets.extend(resp.get("data", []))
-        cursor = resp.get("next_cursor", "LTE=")
-        if cursor == "LTE=":
-            break
-    return markets
+def find_active_btc_5min_market(client: ClobClient) -> dict | None:
+    """Look up the current BTC 5-min market by computing its slug from the clock.
+
+    Slug format: btc-updown-5m-{epoch} where epoch is the UTC timestamp of the
+    start of the current 5-minute window (floored to nearest 300 seconds).
+    Returns the CLOB market dict, or None if not found or not yet active.
+    """
+    now = datetime.now(timezone.utc)
+    window_start = (int(now.timestamp()) // 300) * 300
+    slug = f"btc-updown-5m-{window_start}"
+
+    resp = requests.get(f"{GAMMA_API}/events", params={"slug": slug}, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    # API returns [] when not found, [{event}] or a single {event} when found
+    if isinstance(data, list):
+        if not data:
+            return None
+        event = data[0]
+    else:
+        if not data:
+            return None
+        event = data
+
+    markets = event.get("markets", [])
+    if not markets:
+        return None
+    condition_id = markets[0].get("conditionId")
+    if not condition_id:
+        return None
+
+    market: dict = client.get_market(condition_id)  # type: ignore[assignment]
+    if not (market.get("active") and not market.get("closed")):
+        return None
+    return market
 
 
 def run_countdown(end_dt) -> None:
@@ -132,6 +136,7 @@ def place_order(client: ClobClient, token_id: str, side_label: str) -> dict | No
     """
     order_args = MarketOrderArgs(
         token_id=token_id,
+        price=.99,
         amount=5.0,
         side=BUY,
         order_type=OrderType.FOK,
@@ -175,13 +180,14 @@ def place_order(client: ClobClient, token_id: str, side_label: str) -> dict | No
     }
 
 
-def poll_resolution(client: ClobClient, condition_id: str, fill: dict) -> None:
+def poll_resolution( client: ClobClient, condition_id: str, fill: dict) -> None:
     """Poll for market resolution (up to 60s) and print win/loss result."""
     print()
     for _ in range(12):  # 12 × 5s = 60s max
         time.sleep(5)
         market = client.get_market(condition_id)
         if not market.get("closed"):
+            print(market)
             continue
 
         winning_token_id = None
@@ -212,6 +218,40 @@ def poll_resolution(client: ClobClient, condition_id: str, fill: dict) -> None:
 
     print(f"\nResolution pending — check Polymarket for order {fill['order_id']}")
 
+def seconds_until_next_five_min_interval():
+    """
+    Calculates the number of seconds from a given timestamp to the next 
+    five-minute interval boundary (e.g., hh:00:00, hh:05:00, ..., hh:55:00).
+    
+    Args:
+        now_timestamp: The current time, typically from datetime.now()
+    
+    Returns:
+        The number of seconds (float) until the next five-minute interval.
+    """
+    
+    # Calculate the total seconds from the epoch to the current time
+    # using time.time() is efficient for this purpose
+    timestamp = time.time()
+    
+    # The next 5-minute interval in seconds since the epoch is found 
+    # by adding 300 seconds to the current timestamp and then using 
+    # the modulo operator to find the remainder, which is subtracted
+    # from the current time plus 300 seconds.
+    interval_seconds = 300 # 5 minutes * 60 seconds/minute
+    
+    # The time of the next interval mark (since epoch)
+    next_interval_timestamp = timestamp + interval_seconds - (timestamp % interval_seconds)
+    
+    # The difference is the time remaining
+    seconds_remaining = next_interval_timestamp - timestamp
+    
+    # Alternatively, you can use datetime objects for clarity and the total_seconds() method:
+    # now = datetime.fromtimestamp(timestamp)
+    # next_interval = datetime.fromtimestamp(next_interval_timestamp)
+    # seconds_remaining_dt = (next_interval - now).total_seconds()
+    
+    return seconds_remaining // 1
 
 def main():
     try:
@@ -220,63 +260,63 @@ def main():
         print(f"Error: {e}")
         return
 
-    while True:
-        print("\nLooking up active BTC 5-min market...")
-        try:
-            all_markets = fetch_all_markets(client)
-        except Exception as e:
-            print(f"Error fetching markets: {e}")
-            return
+    print("\nLooking up active BTC 5-min market...")
+    try:
+        market = find_active_btc_5min_market(client)
+    except Exception as e:
+        print(f"Error fetching markets: {e}")
+        return
+    if market is None:
+        print("No active BTC 5-minute market found. Exiting.")
+        return
 
-        market = find_btc_5min_market(all_markets)
-        if market is None:
-            print("No active BTC 5-minute market found. Exiting.")
-            return
+    condition_id = market["condition_id"]
+    print(f"Found active market with condition ID: {condition_id}")
+    up_token_id, down_token_id = get_token_ids(market)
 
-        condition_id = market["condition_id"]
-        end_dt = datetime.fromisoformat(market["end_date_iso"].replace("Z", "+00:00"))
-        up_token_id, down_token_id = get_token_ids(market)
+    remaining = seconds_until_next_five_min_interval()
+    print(f"\nActive market: {market['question']}")
+    print(f"Closes in: {remaining:.0f} seconds")
+    print()
+    print("1. Buy UP  (Yes)")
+    print("2. Buy DOWN (No)")
+    print("3. Exit")
+    print()
 
-        remaining = (end_dt - datetime.now(timezone.utc)).total_seconds()
-        print(f"\nActive market: {market['question']}")
-        print(f"Closes in: {format_countdown(int(remaining))}")
-        print()
-        print("1. Buy UP  (Yes)")
-        print("2. Buy DOWN (No)")
-        print("3. Exit")
-        print()
+    choice = input("Choice: ").strip()
 
-        choice = input("Choice: ").strip()
+    if choice == "3":
+        print("Goodbye.")
+        sys.exit(1)
+    elif choice == "1":
+        selected_token_id, side_label = up_token_id, "UP"
+    elif choice == "2":
+        selected_token_id, side_label = down_token_id, "DOWN"
+    else:
+        print("Invalid choice — enter 1, 2, or 3.")
+        sys.exit(1)
+    
+    try:
+        fill = place_order(client, selected_token_id, side_label)
+    except Exception as e:
+        print(f"Order error: {e}")
+        sys.exit(1)
 
-        if choice == "3":
-            print("Goodbye.")
-            break
-        elif choice == "1":
-            selected_token_id, side_label = up_token_id, "UP"
-        elif choice == "2":
-            selected_token_id, side_label = down_token_id, "DOWN"
-        else:
-            print("Invalid choice — enter 1, 2, or 3.")
-            continue
+    if fill is None:
+        print("No fill obtained. Exiting.")
+        sys.exit(1)
 
-        try:
-            fill = place_order(client, selected_token_id, side_label)
-        except Exception as e:
-            print(f"Order error: {e}")
-            continue
+    print("\nOrder filled. Waiting for market to close...")
 
-        if fill is None:
-            continue
+    remaining = seconds_until_next_five_min_interval()
+    time.sleep(int(remaining))
 
-        try:
-            run_countdown(end_dt)
-        except Exception as e:
-            print(f"Countdown error: {e}")
+    print("\nMarket closed. Checking resolution...")
 
-        try:
-            poll_resolution(client, condition_id, fill)
-        except Exception as e:
-            print(f"Resolution error: {e}")
+    try:
+        poll_resolution( client, condition_id ,fill)
+    except Exception as e:
+        print(f"Resolution error: {e}")
 
 
 if __name__ == "__main__":

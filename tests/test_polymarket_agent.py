@@ -19,42 +19,6 @@ def _market(question, active=True, closed=False, minutes_from_now=3):
     }
 
 
-def test_find_btc_5min_market_returns_nearest():
-    from polymarket_agent import find_btc_5min_market
-    m1 = _market("Will BTC be higher in 5 min?", minutes_from_now=10)
-    m2 = _market("Will BTC be higher in 5 min?", minutes_from_now=3)
-    result = find_btc_5min_market([m1, m2])
-    assert result is m2
-
-
-def test_find_btc_5min_market_ignores_inactive():
-    from polymarket_agent import find_btc_5min_market
-    m = _market("Will BTC be higher in 5 min?", active=False)
-    assert find_btc_5min_market([m]) is None
-
-
-def test_find_btc_5min_market_ignores_closed():
-    from polymarket_agent import find_btc_5min_market
-    m = _market("Will BTC be higher in 5 min?", closed=True)
-    assert find_btc_5min_market([m]) is None
-
-
-def test_find_btc_5min_market_ignores_non_btc():
-    from polymarket_agent import find_btc_5min_market
-    m = _market("Will ETH be higher in 5 min?")
-    assert find_btc_5min_market([m]) is None
-
-
-def test_find_btc_5min_market_ignores_non_5min():
-    from polymarket_agent import find_btc_5min_market
-    m = _market("Will BTC be higher at end of day?")
-    assert find_btc_5min_market([m]) is None
-
-
-def test_find_btc_5min_market_no_markets():
-    from polymarket_agent import find_btc_5min_market
-    assert find_btc_5min_market([]) is None
-
 
 def test_get_token_ids_returns_up_down():
     from polymarket_agent import get_token_ids

@@ -79,7 +79,8 @@ def build_right_panel(state: AppState, panel_height: int) -> Panel:
     """Build the right Rich Panel showing the action log."""
     with state.lock:
         lines = list(state.log_lines)
-    visible = lines[-(panel_height - 2):]  # subtract 2 for panel border
+    visible_count = max(0, panel_height - 2)
+    visible = lines[-visible_count:] if visible_count > 0 else []
     t = Text("\n".join(f"> {line}" for line in visible))
     return Panel(t, title="LOG", border_style="cyan")
 

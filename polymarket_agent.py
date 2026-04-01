@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from rich.panel import Panel
+from rich.text import Text
+
 from polymarket_interact import (
     build_client,
     find_active_btc_5min_market,
@@ -41,10 +44,6 @@ class AppState:
                 self.log_lines = self.log_lines[-MAX_LOG_LINES:]
 
 
-from rich.panel import Panel
-from rich.text import Text
-
-
 def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
     """Build the left Rich Panel from current AppState."""
     countdown = format_countdown(int(seconds_remaining))
@@ -67,8 +66,8 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
 
         elif state.status == Status.ORDER_PLACED:
             if state.fill:
-                side = state.fill["side_label"]
-                cost = state.fill["cost"]
+                side = state.fill.get("side_label", "?")
+                cost = state.fill.get("cost", 0.0)
                 t.append(f"Bought {side} at ${cost:.2f} — waiting for market close\n\n",
                          style="bold green")
             t.append("[3] Exit\n", style="dim")

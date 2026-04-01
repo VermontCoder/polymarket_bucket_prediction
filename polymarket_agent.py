@@ -75,6 +75,15 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
     return Panel(t, title="ACTIVE MARKET", border_style="blue")
 
 
+def build_right_panel(state: AppState, panel_height: int) -> Panel:
+    """Build the right Rich Panel showing the action log."""
+    with state.lock:
+        lines = list(state.log_lines)
+    visible = lines[-(panel_height - 2):]  # subtract 2 for panel border
+    t = Text("\n".join(f"> {line}" for line in visible))
+    return Panel(t, title="LOG", border_style="cyan")
+
+
 def format_countdown(seconds: int) -> str:
     """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
     if seconds <= 0:

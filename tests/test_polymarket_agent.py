@@ -174,3 +174,39 @@ def test_build_left_panel_waiting_next_market():
     panel = build_left_panel(state, seconds_remaining=180)
     text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
     assert "next market" in text.lower()
+
+
+def test_build_right_panel_shows_log_lines():
+    from polymarket_agent import build_right_panel, Status
+    import threading
+    from polymarket_agent import AppState
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None,
+        log_lines=["line one", "line two", "line three"],
+        lock=threading.Lock(),
+    )
+    panel = build_right_panel(state, panel_height=20)
+    text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
+    assert "line one" in text
+    assert "line three" in text
+
+
+def test_build_right_panel_truncates_to_height():
+    from polymarket_agent import build_right_panel, Status
+    import threading
+    from polymarket_agent import AppState
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None,
+        log_lines=[f"line {i}" for i in range(50)],
+        lock=threading.Lock(),
+    )
+    panel = build_right_panel(state, panel_height=5)
+    text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
+    assert "line 49" in text   # newest line present
+    assert "line 0" not in text  # oldest line trimmed

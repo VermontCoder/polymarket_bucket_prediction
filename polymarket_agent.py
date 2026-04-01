@@ -156,6 +156,57 @@ def run_input_thread(state: AppState, client, stop_event: threading.Event) -> No
         ).start()
 
 
+def advance_to_next_market(state: AppState, client) -> None:
+    """Called from render loop when WAITING_NEXT_MARKET and window has elapsed.
+
+    Spawns resolution thread if there was a fill, then fetches the next market.
+    Transitions to WAITING_FOR_ORDER once a new active market is found.
+    """
+    with state.lock:
+        fill = state.fill
+        slug = state.slug
+
+    if fill is not None:
+        state.log(f"Spawning resolution thread for {slug}...")
+        threading.Thread(
+            target=_resolve_in_background,
+            args=(slug, fill),
+            daemon=True,
+        ).start()
+
+    state.log("Looking up next market...")
+    while True:
+        try:
+            result = find_active_btc_5min_market(client)
+        except Exception as e:
+            state.log(f"Error fetching market: {e} — retrying...")
+            time.sleep(5)
+            continue
+
+        if result is None:
+            state.log("No active market yet — retrying...")
+            time.sleep(5)
+            continue
+
+        market, new_slug = result
+        try:
+            up_token_id, down_token_id = get_token_ids(market)
+        except ValueError as e:
+            state.log(f"Bad market tokens: {e} — retrying...")
+            time.sleep(5)
+            continue
+
+        state.log(f"Found new market: {new_slug}")
+        with state.lock:
+            state.market = market
+            state.slug = new_slug
+            state.up_token_id = up_token_id
+            state.down_token_id = down_token_id
+            state.fill = None
+            state.status = Status.WAITING_FOR_ORDER
+        return
+
+
 def format_countdown(seconds: int) -> str:
     """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
     if seconds <= 0:

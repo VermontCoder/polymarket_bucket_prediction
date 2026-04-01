@@ -1,11 +1,12 @@
-import sys
 import time
 import threading
 
-from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -217,17 +218,6 @@ def format_countdown(seconds: int) -> str:
     return f"{s}s"
 
 
-def run_countdown(end_dt) -> None:
-    """Display a live single-line countdown to end_dt, updating every second."""
-    while True:
-        remaining = (end_dt - datetime.now(timezone.utc)).total_seconds()
-        if remaining <= 0:
-            print("\rWaiting for market close...  [ closed ]              ", flush=True)
-            break
-        label = format_countdown(int(remaining))
-        print(f"\rWaiting for market close...  [ {label} remaining ]   ", end="", flush=True)
-        time.sleep(1)
-
 
 def seconds_until_next_five_min_interval():
     """
@@ -253,73 +243,92 @@ def _resolve_in_background(slug: str, fill: dict) -> None:
             f.write(f"\nResolution error: {e}\n")
 
 
-def main():
+def main() -> None:
+    console = Console()
+
     try:
         client = build_client()
     except EnvironmentError as e:
-        print(f"Error: {e}")
+        console.print(f"[red]Error:[/red] {e}")
         return
 
-    while True:
-        print("\nLooking up active BTC 5-min market...")
-        try:
-            result = find_active_btc_5min_market(client)
-        except Exception as e:
-            print(f"Error fetching markets: {e}")
-            result = None
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None,
+        slug=None,
+        up_token_id=None,
+        down_token_id=None,
+        fill=None,
+        log_lines=[],
+        lock=threading.Lock(),
+    )
 
-        if result is None:
-            remaining = seconds_until_next_five_min_interval()
-            print(f"No active market found. Next window in {remaining:.0f}s. Waiting...")
-            time.sleep(int(remaining))
-            client = build_client()
-            continue
+    # Initial market fetch before starting the Live display
+    state.log("Looking up active BTC 5-min market...")
+    try:
+        result = find_active_btc_5min_market(client)
+    except Exception as e:
+        console.print(f"[red]Error fetching market:[/red] {e}")
+        return
 
-        market, slug = result
-        print(f"Found active market (slug: {slug})")
+    if result is None:
+        console.print("No active BTC 5-minute market found. Exiting.")
+        return
+
+    market, slug = result
+    try:
         up_token_id, down_token_id = get_token_ids(market)
+    except ValueError as e:
+        console.print(f"[red]Bad market tokens:[/red] {e}")
+        return
 
-        # Order placement loop for this market window
-        fill = None
-        while fill is None:
-            remaining = seconds_until_next_five_min_interval()
-            print(f"\nActive market: {market['question']}")
-            print(f"Closes in: {remaining:.0f} seconds")
-            print()
-            print("1. Buy UP  (Yes)")
-            print("2. Buy DOWN (No)")
-            print("3. Exit")
-            print()
+    with state.lock:
+        state.market = market
+        state.slug = slug
+        state.up_token_id = up_token_id
+        state.down_token_id = down_token_id
+    state.log(f"Found market: {slug}")
 
-            choice = input("Choice: ").strip()
+    stop_event = threading.Event()
 
-            if choice == "3":
-                print("Goodbye.")
-                sys.exit(0)
-            elif choice == "1":
-                selected_token_id, side_label = up_token_id, "UP"
-            elif choice == "2":
-                selected_token_id, side_label = down_token_id, "DOWN"
-            else:
-                print("Invalid choice — enter 1, 2, or 3.")
-                continue
+    input_thread = threading.Thread(
+        target=run_input_thread,
+        args=(state, client, stop_event),
+        daemon=True,
+    )
+    input_thread.start()
 
-            try:
-                fill = place_order(client, selected_token_id, side_label)
-            except Exception as e:
-                print(f"Order error: {e}")
-                sys.exit(1)
+    layout = Layout()
+    layout.split_row(
+        Layout(name="left"),
+        Layout(name="right"),
+    )
 
-            if fill is None:
-                print("No fill obtained. Try again.")
+    _advance_pending = False  # True while advance_to_next_market is running
 
-        # Poll resolution on a background thread, then loop back for the next market
-        threading.Thread(target=_resolve_in_background, args=(slug, fill), daemon=True).start()
+    with Live(layout, console=console, refresh_per_second=0.5, screen=True):
+        while not stop_event.is_set():
+            seconds_remaining = seconds_until_next_five_min_interval()
+            panel_height = console.height
 
-        remaining = seconds_until_next_five_min_interval()
-        print(f"\n Waiting for next market. Next market in {remaining:.0f}s...")
-        time.sleep(int(remaining+3))  # Add a few seconds buffer to ensure we move into the next market window
-        client = build_client()
+            with state.lock:
+                current_status = state.status
+
+            layout["left"].update(build_left_panel(state, seconds_remaining))
+            layout["right"].update(build_right_panel(state, panel_height))
+
+            # Trigger market advance when window elapses and not already running
+            if current_status == Status.WAITING_NEXT_MARKET and seconds_remaining <= 3 and not _advance_pending:
+                _advance_pending = True
+                def _advance():
+                    advance_to_next_market(state, client)
+                threading.Thread(target=_advance, daemon=True).start()
+
+            # Reset advance flag once we're back to WAITING_FOR_ORDER
+            if current_status == Status.WAITING_FOR_ORDER:
+                _advance_pending = False
+
+            time.sleep(2)
 
 
 if __name__ == "__main__":

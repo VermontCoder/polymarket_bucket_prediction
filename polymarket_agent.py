@@ -85,6 +85,37 @@ def build_right_panel(state: AppState, panel_height: int) -> Panel:
     return Panel(t, title="LOG", border_style="cyan")
 
 
+def run_order_thread(
+    state: AppState,
+    client,
+    token_id: str,
+    side_label: str,
+) -> None:
+    """Called on a one-shot thread. Places the order and updates AppState."""
+    state.log(f"Placing order: BUY {side_label}...")
+    try:
+        fill = place_order(client, token_id, side_label)
+    except Exception as e:
+        state.log(f"Order error: {e}")
+        with state.lock:
+            state.status = Status.WAITING_FOR_ORDER
+        return
+
+    if fill is None:
+        state.log("No fill obtained.")
+        with state.lock:
+            state.status = Status.WAITING_FOR_ORDER
+        return
+
+    state.log(f"Order filled: BUY {side_label}")
+    state.log(f"  Order ID:  {fill['order_id']}")
+    state.log(f"  Shares:    {fill['shares']:.3f}")
+    state.log(f"  Cost:      ${fill['cost']:.2f}")
+    with state.lock:
+        state.fill = fill
+        state.status = Status.WAITING_NEXT_MARKET
+
+
 def format_countdown(seconds: int) -> str:
     """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
     if seconds <= 0:

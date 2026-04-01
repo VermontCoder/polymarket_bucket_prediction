@@ -19,6 +19,21 @@ def _market(question, active=True, closed=False, minutes_from_now=3):
     }
 
 
+def _make_state(status, market=None, slug=None, fill=None):
+    import threading
+    from polymarket_agent import AppState
+    return AppState(
+        status=status,
+        market=market,
+        slug=slug,
+        up_token_id="111",
+        down_token_id="222",
+        fill=fill,
+        log_lines=[],
+        lock=threading.Lock(),
+    )
+
+
 
 def test_get_token_ids_returns_up_down():
     from polymarket_agent import get_token_ids
@@ -127,3 +142,35 @@ def test_appstate_log_caps_at_max():
         state.log(str(i))
     assert len(state.log_lines) == MAX_LOG_LINES
     assert state.log_lines[-1] == str(MAX_LOG_LINES + 9)
+
+
+def test_build_left_panel_waiting_for_order_contains_menu():
+    from polymarket_agent import build_left_panel, Status
+    market = {"question": "Will BTC go up?"}
+    state = _make_state(Status.WAITING_FOR_ORDER, market=market, slug="btc-updown-5m-123")
+    panel = build_left_panel(state, seconds_remaining=42)
+    text = panel.renderable if hasattr(panel, 'renderable') else str(panel)
+    assert "Buy UP" in str(text)
+    assert "Buy DOWN" in str(text)
+    assert "Exit" in str(text)
+    assert "42" in str(text)
+
+
+def test_build_left_panel_order_placed_hides_buy_options():
+    from polymarket_agent import build_left_panel, Status
+    fill = {"side_label": "UP", "cost": 3.25, "shares": 5.0}
+    market = {"question": "Will BTC go up?"}
+    state = _make_state(Status.ORDER_PLACED, market=market, slug="btc-updown-5m-123", fill=fill)
+    panel = build_left_panel(state, seconds_remaining=42)
+    text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
+    assert "Buy UP" not in text
+    assert "Buy DOWN" not in text
+    assert "UP" in text  # fill side_label shown
+
+
+def test_build_left_panel_waiting_next_market():
+    from polymarket_agent import build_left_panel, Status
+    state = _make_state(Status.WAITING_NEXT_MARKET)
+    panel = build_left_panel(state, seconds_remaining=180)
+    text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
+    assert "next market" in text.lower()

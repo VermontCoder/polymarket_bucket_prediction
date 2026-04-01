@@ -41,6 +41,41 @@ class AppState:
                 self.log_lines = self.log_lines[-MAX_LOG_LINES:]
 
 
+from rich.panel import Panel
+from rich.text import Text
+
+
+def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
+    """Build the left Rich Panel from current AppState."""
+    countdown = format_countdown(int(seconds_remaining))
+    t = Text()
+
+    if state.status == Status.WAITING_NEXT_MARKET:
+        t.append("Waiting for next market window...\n\n", style="bold yellow")
+        t.append(f"Next window in: {countdown}", style="cyan")
+    else:
+        question = state.market.get("question", "") if state.market else ""
+        t.append(f"{question}\n", style="bold white")
+        t.append(f"{state.slug or ''}\n\n", style="dim")
+        t.append(f"Closes in: {countdown}\n\n", style="cyan")
+
+        if state.status == Status.WAITING_FOR_ORDER:
+            t.append("[1] Buy UP\n", style="green")
+            t.append("[2] Buy DOWN\n", style="red")
+            t.append("[3] Exit\n\n", style="dim")
+            t.append("Press a key...", style="italic dim")
+
+        elif state.status == Status.ORDER_PLACED:
+            if state.fill:
+                side = state.fill["side_label"]
+                cost = state.fill["cost"]
+                t.append(f"Bought {side} at ${cost:.2f} — waiting for market close\n\n",
+                         style="bold green")
+            t.append("[3] Exit\n", style="dim")
+
+    return Panel(t, title="ACTIVE MARKET", border_style="blue")
+
+
 def format_countdown(seconds: int) -> str:
     """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
     if seconds <= 0:

@@ -1,7 +1,10 @@
 import sys
 import time
+import threading
 
 from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from enum import Enum, auto
 
 from polymarket_interact import (
     build_client,
@@ -10,6 +13,32 @@ from polymarket_interact import (
     place_order,
     poll_resolution,
 )
+
+MAX_LOG_LINES = 200
+
+
+class Status(Enum):
+    WAITING_FOR_ORDER = auto()
+    ORDER_PLACED = auto()
+    WAITING_NEXT_MARKET = auto()
+
+
+@dataclass
+class AppState:
+    status: Status
+    market: dict | None
+    slug: str | None
+    up_token_id: str | None
+    down_token_id: str | None
+    fill: dict | None
+    log_lines: list
+    lock: threading.Lock
+
+    def log(self, msg: str) -> None:
+        with self.lock:
+            self.log_lines.append(msg)
+            if len(self.log_lines) > MAX_LOG_LINES:
+                self.log_lines = self.log_lines[-MAX_LOG_LINES:]
 
 
 def format_countdown(seconds: int) -> str:
@@ -49,6 +78,15 @@ def seconds_until_next_five_min_interval():
     return seconds_remaining // 1
 
 
+def _resolve_in_background(slug: str, fill: dict) -> None:
+    log_path = f"resolution_{slug}.log"
+    with open(log_path, "w") as f:
+        try:
+            poll_resolution(slug, fill, out=f)
+        except Exception as e:
+            f.write(f"\nResolution error: {e}\n")
+
+
 def main():
     try:
         client = build_client()
@@ -56,67 +94,66 @@ def main():
         print(f"Error: {e}")
         return
 
-    print("\nLooking up active BTC 5-min market...")
-    try:
-        result = find_active_btc_5min_market(client)
-    except Exception as e:
-        print(f"Error fetching markets: {e}")
-        return
-    if result is None:
-        print("No active BTC 5-minute market found. Exiting.")
-        return
-
-    market, slug = result
-    print(f"Found active market (slug: {slug})")
-    up_token_id, down_token_id = get_token_ids(market)
-
     while True:
-        remaining = seconds_until_next_five_min_interval()
-        print(f"\nActive market: {market['question']}")
-        print(f"Closes in: {remaining:.0f} seconds")
-        print()
-        print("1. Buy UP  (Yes)")
-        print("2. Buy DOWN (No)")
-        print("3. Exit")
-        print()
-
-        choice = input("Choice: ").strip()
-
-        if choice == "3":
-            print("Goodbye.")
-            sys.exit(1)
-        elif choice == "1":
-            selected_token_id, side_label = up_token_id, "UP"
-        elif choice == "2":
-            selected_token_id, side_label = down_token_id, "DOWN"
-        else:
-            print("Invalid choice — enter 1, 2, or 3.")
-            sys.exit(1)
-
+        print("\nLooking up active BTC 5-min market...")
         try:
-            fill = place_order(client, selected_token_id, side_label)
+            result = find_active_btc_5min_market(client)
         except Exception as e:
-            print(f"Order error: {e}")
-            sys.exit(1)
+            print(f"Error fetching markets: {e}")
+            result = None
 
-        if fill is None:
-            print("No fill obtained. Returning.")
+        if result is None:
+            remaining = seconds_until_next_five_min_interval()
+            print(f"No active market found. Next window in {remaining:.0f}s. Waiting...")
+            time.sleep(int(remaining))
+            client = build_client()
             continue
-        else:
-            break
-        
 
-    print("\nOrder filled. Waiting for market to close...")
+        market, slug = result
+        print(f"Found active market (slug: {slug})")
+        up_token_id, down_token_id = get_token_ids(market)
 
-    remaining = seconds_until_next_five_min_interval()
-    time.sleep(int(remaining))
+        # Order placement loop for this market window
+        fill = None
+        while fill is None:
+            remaining = seconds_until_next_five_min_interval()
+            print(f"\nActive market: {market['question']}")
+            print(f"Closes in: {remaining:.0f} seconds")
+            print()
+            print("1. Buy UP  (Yes)")
+            print("2. Buy DOWN (No)")
+            print("3. Exit")
+            print()
 
-    print("\nMarket closed. Checking resolution...")
+            choice = input("Choice: ").strip()
 
-    try:
-        poll_resolution(slug, fill)
-    except Exception as e:
-        print(f"Resolution error: {e}")
+            if choice == "3":
+                print("Goodbye.")
+                sys.exit(0)
+            elif choice == "1":
+                selected_token_id, side_label = up_token_id, "UP"
+            elif choice == "2":
+                selected_token_id, side_label = down_token_id, "DOWN"
+            else:
+                print("Invalid choice — enter 1, 2, or 3.")
+                continue
+
+            try:
+                fill = place_order(client, selected_token_id, side_label)
+            except Exception as e:
+                print(f"Order error: {e}")
+                sys.exit(1)
+
+            if fill is None:
+                print("No fill obtained. Try again.")
+
+        # Poll resolution on a background thread, then loop back for the next market
+        threading.Thread(target=_resolve_in_background, args=(slug, fill), daemon=True).start()
+
+        remaining = seconds_until_next_five_min_interval()
+        print(f"\n Waiting for next market. Next market in {remaining:.0f}s...")
+        time.sleep(int(remaining+3))  # Add a few seconds buffer to ensure we move into the next market window
+        client = build_client()
 
 
 if __name__ == "__main__":

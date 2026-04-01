@@ -96,3 +96,34 @@ def test_format_countdown_negative():
 def test_format_countdown_exact_minute():
     from polymarket_agent import format_countdown
     assert format_countdown(60) == "1m 0s"
+
+
+def test_appstate_log_appends():
+    from polymarket_agent import AppState, Status
+    import threading
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+    )
+    state.log("hello")
+    state.log("world")
+    assert state.log_lines == ["hello", "world"]
+
+
+def test_appstate_log_caps_at_max():
+    from polymarket_agent import AppState, Status, MAX_LOG_LINES
+    import threading
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+    )
+    for i in range(MAX_LOG_LINES + 10):
+        state.log(str(i))
+    assert len(state.log_lines) == MAX_LOG_LINES
+    assert state.log_lines[-1] == str(MAX_LOG_LINES + 9)

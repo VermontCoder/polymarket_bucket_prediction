@@ -47,12 +47,12 @@ class AppState:
 
 ```
 WAITING_FOR_ORDER
-  → key 1/2: spawn order thread → ORDER_PLACED
+  → key 1/2: set status = ORDER_PLACED (under lock), then spawn order thread
   → key 3:   exit
 
 ORDER_PLACED
-  → key 3:          exit (only accepted input)
-  → order filled:   store fill in AppState → WAITING_NEXT_MARKET
+  → key 3:            exit (only accepted input)
+  → order filled:     store fill in AppState → WAITING_NEXT_MARKET
   → order not filled: log "No fill obtained." → WAITING_FOR_ORDER
 
 WAITING_NEXT_MARKET
@@ -61,6 +61,8 @@ WAITING_NEXT_MARKET
       → fetch next market (retry until found)
       → market found: clear fill, → WAITING_FOR_ORDER
 ```
+
+**Critical ordering rule:** The status must be set to `ORDER_PLACED` under the lock *before* the order thread is spawned. This ensures that any keypress received between the status write and the thread start is already rejected by the input thread's guard check. No keypress after the initial 1/2 can trigger a second `place_order()` call until the current order resolves.
 
 ---
 

@@ -3,7 +3,7 @@ import time
 import threading
 
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 
 from polymarket_interact import (
@@ -31,7 +31,7 @@ class AppState:
     up_token_id: str | None
     down_token_id: str | None
     fill: dict | None
-    log_lines: list
+    log_lines: list[str]
     lock: threading.Lock
 
     def log(self, msg: str) -> None:

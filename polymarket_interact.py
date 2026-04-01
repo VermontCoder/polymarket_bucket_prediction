@@ -166,30 +166,34 @@ def place_order(client: ClobClient, token_id: str, side_label: str) -> dict | No
     }
 
 
-def poll_resolution(slug: str, fill: dict) -> None:
+def poll_resolution(slug: str, fill: dict, out=None) -> None:
     """Poll for market resolution (up to 60s) and print win/loss result.
 
     Rebuilds the client each iteration to avoid cached responses, and re-queries
     the Gamma API for a fresh condition_id before fetching market state.
+    If out is provided, writes to that file object instead of stdout.
     """
-    print()
-    for _ in range(50):  # 50 × 5s = 250s max
-        time.sleep(5)
+    import sys
+    if out is None:
+        out = sys.stdout
+
+    print(file=out)
+    for _ in range(10):  # 10 × 90s = 900s max
+        time.sleep(90)
         fresh_client = build_client()
         order: dict = fresh_client.get_order(fill["order_id"])  # type: ignore[assignment]
-        if order.get("expiration") != '0':
-            print("Market not yet closed — waiting...")
-            continue
 
         gamma_market = _fetch_gamma_market(slug)
         if not gamma_market:
-            print("Could not retrieve market data from Gamma — retrying...")
+            print("Could not retrieve market data from Gamma — retrying...", file=out)
+            out.flush()
             continue
 
-        outcomes = ast.literal_eval(gamma_market.get("outcomes")) #Convert to array from string. 
+        outcomes = ast.literal_eval(gamma_market.get("outcomes")) #Convert to array from string.
         outcome_prices = ast.literal_eval(gamma_market.get("outcomePrices"))
         if len(outcomes) != len(outcome_prices):
-            print("Malformed outcome data from Gamma — retrying...")
+            print("Malformed outcome data from Gamma — retrying...", file=out)
+            out.flush()
             continue
 
         resolved_label = None
@@ -199,7 +203,8 @@ def poll_resolution(slug: str, fill: dict) -> None:
                 break
 
         if resolved_label is None:
-            print("Resolution Pending.....")
+            print("Resolution Pending.....", file=out)
+            out.flush()
             continue
 
         won = (order.get("outcome") == resolved_label)
@@ -207,13 +212,16 @@ def poll_resolution(slug: str, fill: dict) -> None:
         result = "WIN " if won else "LOSS"
         pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
 
-        print(f"Result: {result} — bought {fill['side_label']}, resolved {resolved_label}")
+        print(f"Result: {result} — bought {fill['side_label']}, resolved {resolved_label}", file=out)
         print(
             f"  Shares: {fill['shares']:.3f}  |  "
             f"Paid: ${fill['cost']:.2f}  |  "
             f"Payout: ${payout:.2f}  |  "
-            f"P&L: {pnl_str}"
+            f"P&L: {pnl_str}",
+            file=out,
         )
+        out.flush()
         return
 
-    print(f"\nResolution pending — check Polymarket for order {fill['order_id']}")
+    print(f"\nResolution pending — check Polymarket for order {fill['order_id']}", file=out)
+    out.flush()

@@ -318,14 +318,15 @@ def main() -> None:
             layout["right"].update(build_right_panel(state, panel_height))
 
             # Trigger market advance when window elapses and not already running
-            if current_status == Status.WAITING_NEXT_MARKET and seconds_remaining <= 3 and not _advance_pending:
+            if current_status in (Status.WAITING_NEXT_MARKET, Status.WAITING_FOR_ORDER) and seconds_remaining <= 3 and not _advance_pending:
                 _advance_pending = True
                 def _advance():
+                    time.sleep(4)  # wait a few seconds to ensure new market is active
                     advance_to_next_market(state, client)
                 threading.Thread(target=_advance, daemon=True).start()
 
-            # Reset advance flag once we're back to WAITING_FOR_ORDER
-            if current_status == Status.WAITING_FOR_ORDER:
+            # Reset advance flag once we're back to WAITING_FOR_ORDER in a fresh window
+            if current_status == Status.WAITING_FOR_ORDER and seconds_remaining > 10:
                 _advance_pending = False
 
             time.sleep(2)

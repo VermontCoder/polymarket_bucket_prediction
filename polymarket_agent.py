@@ -116,6 +116,46 @@ def run_order_thread(
         state.status = Status.WAITING_NEXT_MARKET
 
 
+def run_input_thread(state: AppState, client, stop_event: threading.Event) -> None:
+    """Runs on a dedicated thread. Reads single keypresses and acts immediately."""
+    import msvcrt
+    while not stop_event.is_set():
+        if not msvcrt.kbhit():
+            time.sleep(0.05)
+            continue
+        key = msvcrt.getwch()
+
+        with state.lock:
+            current_status = state.status
+            up_token_id = state.up_token_id
+            down_token_id = state.down_token_id
+
+        if key == '3':
+            state.log("Exiting...")
+            stop_event.set()
+            return
+
+        if current_status != Status.WAITING_FOR_ORDER:
+            continue  # only '3' accepted in other states
+
+        if key == '1':
+            token_id, side_label = up_token_id, "UP"
+        elif key == '2':
+            token_id, side_label = down_token_id, "DOWN"
+        else:
+            continue
+
+        # Set ORDER_PLACED under lock BEFORE spawning thread (critical ordering rule)
+        with state.lock:
+            state.status = Status.ORDER_PLACED
+
+        threading.Thread(
+            target=run_order_thread,
+            args=(state, client, token_id, side_label),
+            daemon=True,
+        ).start()
+
+
 def format_countdown(seconds: int) -> str:
     """Format seconds as 'Xm Ys' or 'Xs'. Returns '0s' for zero or negative."""
     if seconds <= 0:

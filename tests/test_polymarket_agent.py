@@ -19,7 +19,8 @@ def _market(question, active=True, closed=False, minutes_from_now=3):
     }
 
 
-def _make_state(status, market=None, slug=None, fill=None):
+def _make_state(status, market=None, slug=None, fill=None, smoothed_rates=None,
+                price_to_beat=None, last_snapshot=None):
     import threading
     from polymarket_agent import AppState
     return AppState(
@@ -31,6 +32,9 @@ def _make_state(status, market=None, slug=None, fill=None):
         fill=fill,
         log_lines=[],
         lock=threading.Lock(),
+        smoothed_rates=smoothed_rates or {},
+        price_to_beat=price_to_beat,
+        last_snapshot=last_snapshot,
     )
 
 
@@ -215,6 +219,27 @@ def test_read_cumulative_pnl_sums_records(tmp_path):
     log.write_text("\n".join(json.dumps(r) for r in records) + "\n")
     total = _read_cumulative_pnl(str(log))
     assert abs(total - (2.31 + -2.69)) < 0.0001
+
+
+def test_build_left_panel_shows_snapshot_data():
+    from polymarket_agent import build_left_panel, Status
+    state = _make_state(
+        Status.WAITING_FOR_ORDER,
+        market={"question": "Will BTC go up?"},
+        slug="btc-updown-5m-123",
+        price_to_beat=84000.0,
+        last_snapshot={
+            "up_ask": 54.0, "down_ask": 46.0,
+            "current_price": 84100.0, "time_to_close": 120000,
+            "diff_pct": 0.119,
+        },
+    )
+    panel = build_left_panel(state, seconds_remaining=42)
+    text = str(panel.renderable if hasattr(panel, "renderable") else panel)
+    assert "84000" in text   # price to beat
+    assert "84100" in text   # current price
+    assert "54" in text      # up ask cents
+    assert "46" in text      # down ask cents
 
 
 def test_build_right_panel_truncates_to_height():

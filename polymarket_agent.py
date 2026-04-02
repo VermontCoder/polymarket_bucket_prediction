@@ -3,7 +3,7 @@ import time
 import threading
 from datetime import datetime, timezone
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from rich.console import Console
@@ -41,6 +41,9 @@ class AppState:
     lock: threading.Lock
     run_log_path: str = ""
     cumulative_pnl: float = 0.0
+    smoothed_rates: dict = field(default_factory=dict)
+    price_to_beat: float | None = None
+    last_snapshot: dict | None = None
 
     def log(self, msg: str) -> None:
         with self.lock:
@@ -68,6 +71,23 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
             pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
             pnl_style = "green" if pnl >= 0 else "red"
             t.append(f"Run P&L: {pnl_str}\n\n", style=pnl_style)
+
+            if state.price_to_beat is not None:
+                t.append(f"Price to beat: {state.price_to_beat:.2f}\n", style="dim")
+            if state.last_snapshot is not None:
+                snap = state.last_snapshot
+                cp = snap.get("current_price")
+                ua = snap.get("up_ask")
+                da = snap.get("down_ask")
+                diff = snap.get("diff_pct")
+                if cp is not None:
+                    t.append(f"Current price: {cp:.2f}\n", style="white")
+                if diff is not None:
+                    diff_style = "green" if diff >= 0 else "red"
+                    t.append(f"Diff: {diff:+.4f}%\n", style=diff_style)
+                if ua is not None and da is not None:
+                    t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
+            t.append("\n")
             t.append("[1] Buy UP\n", style="green")
             t.append("[2] Buy DOWN\n", style="red")
             t.append("[3] Exit\n\n", style="dim")

@@ -70,28 +70,30 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
         t.append(f"{state.slug or ''}\n\n", style="dim")
         t.append(f"Closes in: {countdown}\n\n", style="cyan")
 
+        # Always show live price data when available
+        if state.price_to_beat is not None:
+            t.append(f"Price to beat: {state.price_to_beat:.2f}\n", style="dim")
+        if state.last_snapshot is not None:
+            snap = state.last_snapshot
+            cp = snap.get("current_price")
+            ua = snap.get("up_ask")
+            da = snap.get("down_ask")
+            diff = snap.get("diff_pct")
+            if cp is not None:
+                t.append(f"Current price: {cp:.2f}\n", style="white")
+            if diff is not None:
+                diff_style = "green" if diff >= 0 else "red"
+                t.append(f"Diff: {diff:+.4f}%\n", style=diff_style)
+            if ua is not None and da is not None:
+                t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
+        t.append("\n")
+
         if state.status == Status.WAITING_FOR_ORDER:
             pnl = state.cumulative_pnl
             pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
             pnl_style = "green" if pnl >= 0 else "red"
             t.append(f"Run P&L: {pnl_str}\n\n", style=pnl_style)
 
-            if state.price_to_beat is not None:
-                t.append(f"Price to beat: {state.price_to_beat:.2f}\n", style="dim")
-            if state.last_snapshot is not None:
-                snap = state.last_snapshot
-                cp = snap.get("current_price")
-                ua = snap.get("up_ask")
-                da = snap.get("down_ask")
-                diff = snap.get("diff_pct")
-                if cp is not None:
-                    t.append(f"Current price: {cp:.2f}\n", style="white")
-                if diff is not None:
-                    diff_style = "green" if diff >= 0 else "red"
-                    t.append(f"Diff: {diff:+.4f}%\n", style=diff_style)
-                if ua is not None and da is not None:
-                    t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
-            t.append("\n")
             if state.manual:
                 t.append("[1] Buy UP\n", style="green")
                 t.append("[2] Buy DOWN\n", style="red")
@@ -107,7 +109,7 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
                 cost = state.fill.get("cost", 0.0)
                 t.append(f"Bought {side} at ${cost:.2f} — waiting for market close\n\n",
                          style="bold green")
-            t.append("[3] Exit\n", style="dim")
+            t.append("[X] Exit\n", style="dim")
 
     return Panel(t, title="ACTIVE MARKET", border_style="blue")
 

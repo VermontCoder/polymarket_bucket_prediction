@@ -1,7 +1,7 @@
 import random
 from dataclasses import dataclass
 
-from main import load_sessions, load_bucket_rates
+from train import load_sessions, load_bucket_rates
 
 
 @dataclass
@@ -220,8 +220,8 @@ def print_sweep_table(train_sessions: list, test_sessions: list, smoothed_rates:
         )
 
 
-TRAIN_DATA = "data/btc_polymarket_combined_20260325_134508_train.json"
-TEST_DATA = "data/btc_polymarket_combined_20260325_134508_test.json"
+TRAIN_DATA = "data/btc_5_combined_20260402_165038_train.json"
+TEST_DATA = "data/btc_5_combined_20260402_165038_test.json"
 SMOOTHED_RATES_CACHE = "data/smoothed_rates.json"
 TRADE_LOG_PATH = "data/trade_log.txt"
 

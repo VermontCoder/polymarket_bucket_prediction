@@ -46,6 +46,7 @@ class AppState:
     smoothed_rates: dict = field(default_factory=dict)
     price_to_beat: float | None = None
     last_snapshot: dict | None = None
+    threshold: float = 13.0
 
     def log(self, msg: str) -> None:
         with self.lock:
@@ -333,7 +334,7 @@ def run_data_thread(state: AppState, stop_event: threading.Event, client) -> Non
                 continue
 
             if current_status == Status.WAITING_FOR_ORDER and price_to_beat is not None and snap:
-                signal = evaluate_signal(snap, price_to_beat, smoothed_rates)
+                signal = evaluate_signal(snap, price_to_beat, smoothed_rates, threshold=state.threshold)
                 if signal is not None:
                     direction, ask_cents = signal
                     token_id = up_id if direction == "UP" else down_id
@@ -432,6 +433,8 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--ui", action="store_true", help="Run with Rich two-panel display")
+    parser.add_argument("--threshold", type=float, default=13.0,
+                        help="Signal threshold: percent above ask required to place order (default: 13)")
     args = parser.parse_args()
 
     console = Console()
@@ -462,6 +465,7 @@ def main() -> None:
         lock=threading.Lock(),
         run_log_path=run_log_path,
         smoothed_rates=smoothed_rates,
+        threshold=args.threshold,
     )
 
     # Initial market fetch
@@ -489,6 +493,7 @@ def main() -> None:
         state.up_token_id = up_token_id
         state.down_token_id = down_token_id
     state.log(f"Found market: {slug}")
+    state.log(f"Signal threshold: {args.threshold:.0f}%")
 
     # Fetch price-to-beat for the current window in background
     threading.Thread(

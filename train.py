@@ -1,6 +1,7 @@
 import json
 import os
 import random
+from datetime import datetime, timezone, timedelta
 from session import Session
 from visualizer import plot_bucket_predict_rates
 
@@ -108,6 +109,14 @@ def find_train_files() -> list[str]:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--days", type=int, default=None,
+                        help="Only use sessions from the last N days (default: all)")
+    args = parser.parse_args()
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)) if args.days else None
+
     # Split any unsplit JSON files first
     split_unsplit_files()
 
@@ -120,8 +129,14 @@ if __name__ == "__main__":
     all_sessions = []
     for path in train_files:
         sessions = load_sessions(path)
+        if cutoff:
+            before = len(sessions)
+            sessions = [s for s in sessions
+                        if datetime.fromisoformat(s.session_id.replace("Z", "+00:00")) >= cutoff]
+            print(f"Loaded {len(sessions)}/{before} sessions from {path} (last {args.days} days)")
+        else:
+            print(f"Loaded {len(sessions)} sessions from {path}")
         all_sessions.extend(sessions)
-        print(f"Loaded {len(sessions)} sessions from {path}")
 
     total_rows = sum(len(s.rows) for s in all_sessions)
     print(f"\nTotal sessions: {len(all_sessions)}")

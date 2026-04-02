@@ -379,13 +379,73 @@ def _resolve_in_background(slug: str, fill: dict, log_path: str) -> None:
             f.flush()
 
 
+def run_ui_mode(state: AppState, client, stop_event: threading.Event) -> None:
+    """Rich Live two-panel display loop."""
+    console = Console()
+    layout = Layout()
+    layout.split_row(
+        Layout(name="left"),
+        Layout(name="right"),
+    )
+
+    _advance_pending = False
+    _price_capture_pending = False
+
+    with Live(layout, console=console, refresh_per_second=0.5, screen=True):
+        while not stop_event.is_set():
+            seconds_remaining = seconds_until_next_five_min_interval()
+            panel_height = console.height
+
+            with state.lock:
+                current_status = state.status
+
+            layout["left"].update(build_left_panel(state, seconds_remaining))
+            layout["right"].update(build_right_panel(state, panel_height))
+
+            # Capture price-to-beat exactly at boundary
+            if seconds_remaining <= 1 and not _price_capture_pending:
+                _price_capture_pending = True
+                ws = _window_start() + 300  # next window start
+                threading.Thread(
+                    target=_capture_price_to_beat,
+                    args=(state, ws),
+                    daemon=True,
+                ).start()
+
+            # Trigger market advance when window elapses and not already running
+            if current_status in (Status.WAITING_NEXT_MARKET, Status.WAITING_FOR_ORDER) and seconds_remaining <= 3 and not _advance_pending:
+                _advance_pending = True
+                def _advance():
+                    time.sleep(4)
+                    advance_to_next_market(state, client)
+                threading.Thread(target=_advance, daemon=True).start()
+
+            # Reset flags once we're in a fresh window
+            if current_status == Status.WAITING_FOR_ORDER and seconds_remaining > 10:
+                _advance_pending = False
+                _price_capture_pending = False
+
+            time.sleep(2)
+
+
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ui", action="store_true", help="Run with Rich two-panel display")
+    args = parser.parse_args()
+
     console = Console()
 
     try:
         client = build_client()
     except EnvironmentError as e:
         console.print(f"[red]Error:[/red] {e}")
+        return
+
+    try:
+        smoothed_rates = load_smoothed_rates("data/smoothed_rates.json")
+    except Exception as e:
+        console.print(f"[red]Could not load smoothed rates:[/red] {e}")
         return
 
     run_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -401,9 +461,10 @@ def main() -> None:
         log_lines=[],
         lock=threading.Lock(),
         run_log_path=run_log_path,
+        smoothed_rates=smoothed_rates,
     )
 
-    # Initial market fetch before starting the Live display
+    # Initial market fetch
     state.log("Looking up active BTC 5-min market...")
     try:
         result = find_active_btc_5min_market(client)
@@ -429,47 +490,34 @@ def main() -> None:
         state.down_token_id = down_token_id
     state.log(f"Found market: {slug}")
 
+    # Fetch price-to-beat for the current window in background
+    threading.Thread(
+        target=_capture_price_to_beat,
+        args=(state, _window_start()),
+        daemon=True,
+    ).start()
+
     stop_event = threading.Event()
 
-    input_thread = threading.Thread(
-        target=run_input_thread,
-        args=(state, client, stop_event),
+    # Start data polling thread
+    threading.Thread(
+        target=run_data_thread,
+        args=(state, stop_event, client),
         daemon=True,
-    )
-    input_thread.start()
+    ).start()
 
-    layout = Layout()
-    layout.split_row(
-        Layout(name="left"),
-        Layout(name="right"),
-    )
-
-    _advance_pending = False  # True while advance_to_next_market is running
-
-    with Live(layout, console=console, refresh_per_second=0.5, screen=True):
-        while not stop_event.is_set():
-            seconds_remaining = seconds_until_next_five_min_interval()
-            panel_height = console.height
-
-            with state.lock:
-                current_status = state.status
-
-            layout["left"].update(build_left_panel(state, seconds_remaining))
-            layout["right"].update(build_right_panel(state, panel_height))
-
-            # Trigger market advance when window elapses and not already running
-            if current_status in (Status.WAITING_NEXT_MARKET, Status.WAITING_FOR_ORDER) and seconds_remaining <= 3 and not _advance_pending:
-                _advance_pending = True
-                def _advance():
-                    time.sleep(4)  # wait a few seconds to ensure new market is active
-                    advance_to_next_market(state, client)
-                threading.Thread(target=_advance, daemon=True).start()
-
-            # Reset advance flag once we're back to WAITING_FOR_ORDER in a fresh window
-            if current_status == Status.WAITING_FOR_ORDER and seconds_remaining > 10:
-                _advance_pending = False
-
-            time.sleep(2)
+    if args.ui:
+        threading.Thread(
+            target=run_input_thread,
+            args=(state, client, stop_event),
+            daemon=True,
+        ).start()
+        run_ui_mode(state, client, stop_event)
+    else:
+        try:
+            run_headless_mode(state, stop_event)
+        except KeyboardInterrupt:
+            stop_event.set()
 
 
 if __name__ == "__main__":

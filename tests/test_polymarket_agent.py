@@ -148,16 +148,36 @@ def test_appstate_log_caps_at_max():
     assert state.log_lines[-1] == str(MAX_LOG_LINES + 9)
 
 
-def test_build_left_panel_waiting_for_order_contains_menu():
-    from polymarket_agent import build_left_panel, Status
+def test_build_left_panel_manual_mode_contains_menu():
+    from polymarket_agent import build_left_panel, Status, AppState
+    import threading
     market = {"question": "Will BTC go up?"}
-    state = _make_state(Status.WAITING_FOR_ORDER, market=market, slug="btc-updown-5m-123")
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=market, slug="btc-updown-5m-123",
+        up_token_id="111", down_token_id="222",
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+        manual=True,
+    )
     panel = build_left_panel(state, seconds_remaining=42)
     text = panel.renderable if hasattr(panel, 'renderable') else str(panel)
     assert "Buy UP" in str(text)
     assert "Buy DOWN" in str(text)
     assert "Exit" in str(text)
     assert "42" in str(text)
+
+
+def test_build_left_panel_auto_mode_hides_buy_menu():
+    from polymarket_agent import build_left_panel, Status
+    market = {"question": "Will BTC go up?"}
+    state = _make_state(Status.WAITING_FOR_ORDER, market=market, slug="btc-updown-5m-123")
+    panel = build_left_panel(state, seconds_remaining=42)
+    text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
+    assert "Buy UP" not in text
+    assert "Buy DOWN" not in text
+    assert "Auto mode" in text
+    assert "42" in text
 
 
 def test_build_left_panel_order_placed_hides_buy_options():

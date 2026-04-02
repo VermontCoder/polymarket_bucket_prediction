@@ -47,6 +47,7 @@ class AppState:
     price_to_beat: float | None = None
     last_snapshot: dict | None = None
     threshold: float = 13.0
+    manual: bool = False
 
     def log(self, msg: str) -> None:
         with self.lock:
@@ -91,10 +92,14 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
                 if ua is not None and da is not None:
                     t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
             t.append("\n")
-            t.append("[1] Buy UP\n", style="green")
-            t.append("[2] Buy DOWN\n", style="red")
-            t.append("[3] Exit\n\n", style="dim")
-            t.append("Press a key...", style="italic dim")
+            if state.manual:
+                t.append("[1] Buy UP\n", style="green")
+                t.append("[2] Buy DOWN\n", style="red")
+                t.append("[X] Exit\n\n", style="dim")
+                t.append("Press a key...", style="italic dim")
+            else:
+                t.append("Auto mode — signal will fire automatically\n\n", style="italic dim")
+                t.append("[X] Exit", style="dim")
 
         elif state.status == Status.ORDER_PLACED:
             if state.fill:
@@ -150,26 +155,34 @@ def run_order_thread(
 
 
 def run_input_thread(state: AppState, client, stop_event: threading.Event) -> None:
-    """Runs on a dedicated thread. Reads single keypresses and acts immediately."""
+    """Runs on a dedicated thread. Reads single keypresses and acts immediately.
+
+    In auto mode: only X exits.
+    In manual mode: 1=Buy UP, 2=Buy DOWN, X=Exit.
+    """
     import msvcrt
     while not stop_event.is_set():
         if not msvcrt.kbhit():
             time.sleep(0.05)
             continue
-        key = msvcrt.getwch()
+        key = msvcrt.getwch().lower()
 
         with state.lock:
             current_status = state.status
             up_token_id = state.up_token_id
             down_token_id = state.down_token_id
+            manual = state.manual
 
-        if key == '3':
+        if key == 'x':
             state.log("Exiting...")
             stop_event.set()
             return
 
+        if not manual:
+            continue  # auto mode: only X accepted
+
         if current_status != Status.WAITING_FOR_ORDER:
-            continue  # only '3' accepted in other states
+            continue  # only X accepted in other states
 
         if key == '1':
             token_id, side_label = up_token_id, "UP"
@@ -333,7 +346,7 @@ def run_data_thread(state: AppState, stop_event: threading.Event, client) -> Non
                 stop_event.wait(timeout=2)
                 continue
 
-            if current_status == Status.WAITING_FOR_ORDER and price_to_beat is not None and snap:
+            if current_status == Status.WAITING_FOR_ORDER and price_to_beat is not None and snap and not state.manual:
                 signal = evaluate_signal(snap, price_to_beat, smoothed_rates, threshold=state.threshold)
                 if signal is not None:
                     direction, ask_cents = signal
@@ -432,7 +445,8 @@ def run_ui_mode(state: AppState, client, stop_event: threading.Event) -> None:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ui", action="store_true", help="Run with Rich two-panel display")
+    parser.add_argument("--manual", action="store_true",
+                        help="Manual mode: press 1/2 to buy UP/DOWN instead of auto-signal")
     parser.add_argument("--threshold", type=float, default=13.0,
                         help="Signal threshold: percent above ask required to place order (default: 13)")
     args = parser.parse_args()
@@ -466,6 +480,7 @@ def main() -> None:
         run_log_path=run_log_path,
         smoothed_rates=smoothed_rates,
         threshold=args.threshold,
+        manual=args.manual,
     )
 
     # Initial market fetch
@@ -493,7 +508,10 @@ def main() -> None:
         state.up_token_id = up_token_id
         state.down_token_id = down_token_id
     state.log(f"Found market: {slug}")
-    state.log(f"Signal threshold: {args.threshold:.0f}%")
+    if args.manual:
+        state.log("Mode: MANUAL (press 1/2 to buy)")
+    else:
+        state.log(f"Mode: AUTO  threshold={args.threshold:.0f}%")
 
     # Fetch price-to-beat for the current window in background
     threading.Thread(
@@ -511,18 +529,15 @@ def main() -> None:
         daemon=True,
     ).start()
 
-    if args.ui:
-        threading.Thread(
-            target=run_input_thread,
-            args=(state, client, stop_event),
-            daemon=True,
-        ).start()
+    threading.Thread(
+        target=run_input_thread,
+        args=(state, client, stop_event),
+        daemon=True,
+    ).start()
+    try:
         run_ui_mode(state, client, stop_event)
-    else:
-        try:
-            run_headless_mode(state, stop_event)
-        except KeyboardInterrupt:
-            stop_event.set()
+    except KeyboardInterrupt:
+        stop_event.set()
 
 
 if __name__ == "__main__":

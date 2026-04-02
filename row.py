@@ -8,7 +8,8 @@ class Row:
         self.current_price = float(data["current_price"])
         self.diff_pct = float(data["diff_pct"]) if data["diff_pct"] is not None else None
         self.diff_usd = float(data["diff_usd"]) if data["diff_usd"] is not None else None
-        self.time_to_close = int(data["time_to_close"])
+        ttc = data.get("time_to_close")
+        self.time_to_close = int(ttc) if ttc is not None else None
         self.predict = None
 
     def __repr__(self):

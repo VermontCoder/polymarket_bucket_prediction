@@ -285,6 +285,27 @@ def seconds_until_next_five_min_interval():
     return seconds_remaining // 1
 
 
+def run_headless_mode(state: AppState, stop_event: threading.Event) -> None:
+    """Headless main loop. Drains state.log_lines to stdout. Exits on stop_event or 'x' key."""
+    import msvcrt
+    while not stop_event.is_set():
+        if msvcrt.kbhit():
+            key = msvcrt.getwch()
+            if key.lower() == 'x':
+                state.log("Exiting (headless)...")
+                stop_event.set()
+                return
+
+        with state.lock:
+            new_lines = state.log_lines[:]
+            state.log_lines = []
+
+        for line in new_lines:
+            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {line}", flush=True)
+
+        stop_event.wait(timeout=0.1)
+
+
 def run_data_thread(state: AppState, stop_event: threading.Event, client) -> None:
     """Polls market data every 2 seconds, evaluates signal, auto-places order if signal fires."""
     while not stop_event.is_set():

@@ -221,6 +221,25 @@ def test_read_cumulative_pnl_sums_records(tmp_path):
     assert abs(total - (2.31 + -2.69)) < 0.0001
 
 
+def test_run_headless_mode_exits_on_stop():
+    from polymarket_agent import run_headless_mode, AppState, Status
+    import threading, time
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market={"question": "BTC up?"}, slug="btc-updown-5m-123",
+        up_token_id="111", down_token_id="222",
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+    )
+    stop = threading.Event()
+    t = threading.Thread(target=run_headless_mode, args=(state, stop), daemon=True)
+    t.start()
+    time.sleep(0.15)
+    stop.set()
+    t.join(timeout=2)
+    assert not t.is_alive()
+
+
 def test_run_data_thread_stores_snapshot_and_fires_signal():
     from polymarket_agent import run_data_thread, AppState, Status
     import threading, time

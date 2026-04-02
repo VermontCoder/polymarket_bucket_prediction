@@ -221,6 +221,38 @@ def test_read_cumulative_pnl_sums_records(tmp_path):
     assert abs(total - (2.31 + -2.69)) < 0.0001
 
 
+def test_capture_price_to_beat_updates_state():
+    from polymarket_agent import _capture_price_to_beat, AppState, Status
+    import threading
+    from unittest.mock import patch
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+    )
+    with patch("polymarket_agent.fetch_open_price_for_window", return_value=84000.0):
+        _capture_price_to_beat(state, window_start=1775078400)
+    assert state.price_to_beat == 84000.0
+
+
+def test_capture_price_to_beat_logs_on_failure():
+    from polymarket_agent import _capture_price_to_beat, AppState, Status
+    import threading
+    from unittest.mock import patch
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug=None,
+        up_token_id=None, down_token_id=None,
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+    )
+    with patch("polymarket_agent.fetch_open_price_for_window", side_effect=Exception("timeout")):
+        _capture_price_to_beat(state, window_start=1775078400)
+    assert any("price" in line.lower() or "open" in line.lower() for line in state.log_lines)
+
+
 def test_build_left_panel_shows_snapshot_data():
     from polymarket_agent import build_left_panel, Status
     state = _make_state(

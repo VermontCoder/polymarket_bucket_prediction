@@ -19,6 +19,8 @@ from polymarket_interact import (
     place_order,
     poll_resolution,
 )
+from market_data import fetch_open_price_for_window, fetch_btc5m_snapshot
+from signal_eval import evaluate_signal, load_smoothed_rates
 
 MAX_LOG_LINES = 200
 
@@ -280,6 +282,25 @@ def seconds_until_next_five_min_interval():
     next_interval_timestamp = timestamp + interval_seconds - (timestamp % interval_seconds)
     seconds_remaining = next_interval_timestamp - timestamp
     return seconds_remaining // 1
+
+
+def _window_start() -> int:
+    return (int(time.time()) // 300) * 300
+
+
+def _capture_price_to_beat(state: AppState, window_start: int) -> None:
+    """Fetch the Binance open price for the given window and store in state.price_to_beat."""
+    try:
+        price = fetch_open_price_for_window(window_start)
+    except Exception as e:
+        state.log(f"Could not fetch open price: {e}")
+        return
+    if price is None:
+        state.log("Open price unavailable — price_to_beat not set")
+        return
+    with state.lock:
+        state.price_to_beat = price
+    state.log(f"Price to beat: {price:.2f}")
 
 
 def _resolve_in_background(slug: str, fill: dict, log_path: str) -> None:

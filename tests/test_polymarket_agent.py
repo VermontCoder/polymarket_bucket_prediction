@@ -221,6 +221,44 @@ def test_read_cumulative_pnl_sums_records(tmp_path):
     assert abs(total - (2.31 + -2.69)) < 0.0001
 
 
+def test_run_data_thread_stores_snapshot_and_fires_signal():
+    from polymarket_agent import run_data_thread, AppState, Status
+    import threading, time
+    from unittest.mock import patch
+
+    snap = {"up_ask": 70.0, "down_ask": 30.0, "current_price": 84100.0, "time_to_close": 120000}
+    state = AppState(
+        status=Status.WAITING_FOR_ORDER,
+        market=None, slug="btc-5m-test",
+        up_token_id="UP", down_token_id="DN",
+        fill=None, log_lines=[],
+        lock=threading.Lock(),
+        price_to_beat=84000.0,
+        smoothed_rates={(60, 185): 0.95},
+    )
+    stop = threading.Event()
+    order_calls = []
+
+    def fake_order_thread(state_, client_, token_id_, side_label_, price_=0.99):
+        order_calls.append((side_label_, price_))
+        with state_.lock:
+            state_.status = Status.WAITING_NEXT_MARKET
+
+    with patch("polymarket_agent.fetch_btc5m_snapshot", return_value=snap), \
+         patch("polymarket_agent.run_order_thread", side_effect=fake_order_thread):
+        t = threading.Thread(target=run_data_thread, args=(state, stop, None), daemon=True)
+        t.start()
+        time.sleep(0.3)
+        stop.set()
+        t.join(timeout=2)
+
+    assert state.last_snapshot is not None
+    assert "diff_pct" in state.last_snapshot
+    assert len(order_calls) == 1
+    assert order_calls[0][0] == "UP"
+    assert abs(order_calls[0][1] - 0.70) < 0.001
+
+
 def test_capture_price_to_beat_updates_state():
     from polymarket_agent import _capture_price_to_beat, AppState, Status
     import threading

@@ -121,11 +121,12 @@ def run_order_thread(
     client,
     token_id: str,
     side_label: str,
+    price: float = 0.99,
 ) -> None:
     """Called on a one-shot thread. Places the order and updates AppState."""
-    state.log(f"Placing order: BUY {side_label}...")
+    state.log(f"Placing order: BUY {side_label} at {price:.2f}...")
     try:
-        fill = place_order(client, token_id, side_label)
+        fill = place_order(client, token_id, side_label, price)
     except Exception as e:
         state.log(f"Order error: {e}")
         with state.lock:
@@ -282,6 +283,50 @@ def seconds_until_next_five_min_interval():
     next_interval_timestamp = timestamp + interval_seconds - (timestamp % interval_seconds)
     seconds_remaining = next_interval_timestamp - timestamp
     return seconds_remaining // 1
+
+
+def run_data_thread(state: AppState, stop_event: threading.Event, client) -> None:
+    """Polls market data every 2 seconds, evaluates signal, auto-places order if signal fires."""
+    while not stop_event.is_set():
+        with state.lock:
+            up_id = state.up_token_id
+            down_id = state.down_token_id
+            slug = state.slug
+            price_to_beat = state.price_to_beat
+            smoothed_rates = state.smoothed_rates
+            current_status = state.status
+
+        if up_id and down_id and slug:
+            window_end = _window_start() + 300
+            try:
+                snap = fetch_btc5m_snapshot(up_id, down_id, window_end_epoch=window_end)
+                if snap and price_to_beat is not None:
+                    cp = snap.get("current_price")
+                    if cp is not None:
+                        snap["diff_pct"] = (cp - price_to_beat) / price_to_beat * 100
+                with state.lock:
+                    state.last_snapshot = snap
+            except Exception as e:
+                state.log(f"Data fetch error: {e}")
+                stop_event.wait(timeout=2)
+                continue
+
+            if current_status == Status.WAITING_FOR_ORDER and price_to_beat is not None and snap:
+                signal = evaluate_signal(snap, price_to_beat, smoothed_rates)
+                if signal is not None:
+                    direction, ask_cents = signal
+                    token_id = up_id if direction == "UP" else down_id
+                    price = ask_cents / 100
+                    state.log(f"Signal: BUY {direction} at {price:.2f} (ask={ask_cents:.0f}c)")
+                    with state.lock:
+                        state.status = Status.ORDER_PLACED
+                    threading.Thread(
+                        target=run_order_thread,
+                        args=(state, client, token_id, direction, price),
+                        daemon=True,
+                    ).start()
+
+        stop_event.wait(timeout=2)
 
 
 def _window_start() -> int:

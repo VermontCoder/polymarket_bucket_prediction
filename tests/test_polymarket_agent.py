@@ -194,6 +194,29 @@ def test_build_right_panel_shows_log_lines():
     assert "line three" in text
 
 
+def test_read_cumulative_pnl_nothing_logged_yet(tmp_path):
+    from polymarket_agent import _read_cumulative_pnl
+    # File doesn't exist yet (program just started, no market has resolved)
+    assert _read_cumulative_pnl(str(tmp_path / "run.log")) == 0.0
+    # File exists but is empty (e.g. created but nothing written)
+    log = tmp_path / "run.log"
+    log.write_text("")
+    assert _read_cumulative_pnl(str(log)) == 0.0
+
+
+def test_read_cumulative_pnl_sums_records(tmp_path):
+    import json
+    from polymarket_agent import _read_cumulative_pnl
+    log = tmp_path / "run.log"
+    records = [
+        {"slug": "btc-updown-5m-1", "result": "WIN",  "pnl":  2.31},
+        {"slug": "btc-updown-5m-2", "result": "LOSS", "pnl": -2.69},
+    ]
+    log.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    total = _read_cumulative_pnl(str(log))
+    assert abs(total - (2.31 + -2.69)) < 0.0001
+
+
 def test_build_right_panel_truncates_to_height():
     from polymarket_agent import build_right_panel, Status
     import threading

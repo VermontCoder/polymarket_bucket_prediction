@@ -1,4 +1,5 @@
 import ast
+import json
 import os
 import time
 
@@ -116,14 +117,14 @@ def calc_pnl(shares: float, cost: float, won: bool) -> tuple:
     return payout, payout - cost
 
 
-def place_order(client: ClobClient, token_id: str, side_label: str) -> dict | None:
-    """Place a limit buy for 5 shares at price 0.99. Prints fill details. Returns fill dict or None on failure.
+def place_order(client: ClobClient, token_id: str, side_label: str, price: float = 0.99) -> dict | None:
+    """Place a limit buy for 5 shares at the given price. Returns fill dict or None on failure.
 
     Returns dict with keys: order_id, token_id, side_label, shares, cost
     """
     order_args = OrderArgs(
         token_id=token_id,
-        price=0.99,
+        price=price,
         size=5.0,
         side=BUY,
     )
@@ -167,17 +168,16 @@ def place_order(client: ClobClient, token_id: str, side_label: str) -> dict | No
 
 
 def poll_resolution(slug: str, fill: dict, out=None) -> None:
-    """Poll for market resolution (up to 60s) and print win/loss result.
+    """Poll for market resolution and write a JSON result record when resolved.
 
-    Rebuilds the client each iteration to avoid cached responses, and re-queries
-    the Gamma API for a fresh condition_id before fetching market state.
-    If out is provided, writes to that file object instead of stdout.
+    Rebuilds the client each iteration to avoid cached responses. Silently
+    retries until resolved (up to 10 × 90s). If out is provided, writes to
+    that file object instead of stdout.
     """
     import sys
     if out is None:
         out = sys.stdout
 
-    print(file=out)
     for _ in range(10):  # 10 × 90s = 900s max
         time.sleep(90)
         fresh_client = build_client()
@@ -185,15 +185,11 @@ def poll_resolution(slug: str, fill: dict, out=None) -> None:
 
         gamma_market = _fetch_gamma_market(slug)
         if not gamma_market:
-            print("Could not retrieve market data from Gamma — retrying...", file=out)
-            out.flush()
             continue
 
-        outcomes = ast.literal_eval(gamma_market.get("outcomes")) #Convert to array from string.
+        outcomes = ast.literal_eval(gamma_market.get("outcomes"))
         outcome_prices = ast.literal_eval(gamma_market.get("outcomePrices"))
         if len(outcomes) != len(outcome_prices):
-            print("Malformed outcome data from Gamma — retrying...", file=out)
-            out.flush()
             continue
 
         resolved_label = None
@@ -203,25 +199,22 @@ def poll_resolution(slug: str, fill: dict, out=None) -> None:
                 break
 
         if resolved_label is None:
-            print("Resolution Pending.....", file=out)
-            out.flush()
             continue
 
         won = (order.get("outcome") == resolved_label)
         payout, pnl = calc_pnl(fill["shares"], fill["cost"], won)
-        result = "WIN " if won else "LOSS"
-        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
 
-        print(f"Result: {result} — bought {fill['side_label']}, resolved {resolved_label}", file=out)
-        print(
-            f"  Shares: {fill['shares']:.3f}  |  "
-            f"Paid: ${fill['cost']:.2f}  |  "
-            f"Payout: ${payout:.2f}  |  "
-            f"P&L: {pnl_str}",
-            file=out,
-        )
+        record = {
+            "slug": slug,
+            "order_id": fill["order_id"],
+            "side": fill["side_label"],
+            "resolved": resolved_label,
+            "result": "WIN" if won else "LOSS",
+            "shares": round(fill["shares"], 3),
+            "paid": round(fill["cost"], 2),
+            "payout": round(payout, 2),
+            "pnl": round(pnl, 2),
+        }
+        out.write(json.dumps(record) + "\n")
         out.flush()
         return
-
-    print(f"\nResolution pending — check Polymarket for order {fill['order_id']}", file=out)
-    out.flush()

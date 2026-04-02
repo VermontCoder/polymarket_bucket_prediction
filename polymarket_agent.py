@@ -1,5 +1,7 @@
+import json
 import time
 import threading
+from datetime import datetime, timezone
 
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -37,6 +39,8 @@ class AppState:
     fill: dict | None
     log_lines: list[str]
     lock: threading.Lock
+    run_log_path: str = ""
+    cumulative_pnl: float = 0.0
 
     def log(self, msg: str) -> None:
         with self.lock:
@@ -60,6 +64,10 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
         t.append(f"Closes in: {countdown}\n\n", style="cyan")
 
         if state.status == Status.WAITING_FOR_ORDER:
+            pnl = state.cumulative_pnl
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            pnl_style = "green" if pnl >= 0 else "red"
+            t.append(f"Run P&L: {pnl_str}\n\n", style=pnl_style)
             t.append("[1] Buy UP\n", style="green")
             t.append("[2] Buy DOWN\n", style="red")
             t.append("[3] Exit\n\n", style="dim")
@@ -157,6 +165,25 @@ def run_input_thread(state: AppState, client, stop_event: threading.Event) -> No
         ).start()
 
 
+def _read_cumulative_pnl(log_path: str) -> float:
+    """Sum the 'pnl' field from all resolved JSON lines in the run log."""
+    total = 0.0
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    total += record.get("pnl", 0.0)
+                except json.JSONDecodeError:
+                    pass
+    except FileNotFoundError:
+        pass
+    return total
+
+
 def advance_to_next_market(state: AppState, client) -> None:
     """Called from render loop when WAITING_NEXT_MARKET and window has elapsed.
 
@@ -171,7 +198,7 @@ def advance_to_next_market(state: AppState, client) -> None:
         state.log(f"Spawning resolution thread for {slug}...")
         threading.Thread(
             target=_resolve_in_background,
-            args=(slug, fill),
+            args=(slug, fill, state.run_log_path),
             daemon=True,
         ).start()
 
@@ -204,6 +231,7 @@ def advance_to_next_market(state: AppState, client) -> None:
             state.up_token_id = up_token_id
             state.down_token_id = down_token_id
             state.fill = None
+            state.cumulative_pnl = _read_cumulative_pnl(state.run_log_path)
             state.status = Status.WAITING_FOR_ORDER
         return
 
@@ -234,13 +262,14 @@ def seconds_until_next_five_min_interval():
     return seconds_remaining // 1
 
 
-def _resolve_in_background(slug: str, fill: dict) -> None:
-    log_path = f"resolution_{slug}.log"
-    with open(log_path, "w") as f:
+def _resolve_in_background(slug: str, fill: dict, log_path: str) -> None:
+    with open(log_path, "a") as f:
         try:
             poll_resolution(slug, fill, out=f)
         except Exception as e:
-            f.write(f"\nResolution error: {e}\n")
+            import json
+            f.write(json.dumps({"slug": slug, "error": str(e)}) + "\n")
+            f.flush()
 
 
 def main() -> None:
@@ -252,6 +281,9 @@ def main() -> None:
         console.print(f"[red]Error:[/red] {e}")
         return
 
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_log_path = f"logs/resolution_{run_ts}.log"
+
     state = AppState(
         status=Status.WAITING_FOR_ORDER,
         market=None,
@@ -261,6 +293,7 @@ def main() -> None:
         fill=None,
         log_lines=[],
         lock=threading.Lock(),
+        run_log_path=run_log_path,
     )
 
     # Initial market fetch before starting the Live display

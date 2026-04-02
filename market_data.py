@@ -20,13 +20,22 @@ def fetch_post(url: str, body: bytes):
         return json.loads(resp.read())
 
 
-def fetch_open_price_for_window(window_start: int, symbol: str = "BTCUSDT") -> float | None:
-    """Return the 1-minute Binance open price at the given UTC epoch second."""
+def fetch_open_price_for_window(window_start: int, symbol: str = "BTCUSDT",
+                                retries: int = 6, retry_delay: float = 2.0) -> float | None:
+    """Return the 1-minute Binance open price at the given UTC epoch second.
+
+    Retries up to `retries` times (2s apart) in case the kline hasn't appeared
+    yet on Binance (e.g. when called right at or just before the window boundary).
+    """
     start_ms = window_start * 1000
     url = (f"https://api.binance.com/api/v3/klines"
            f"?symbol={symbol}&interval=1m&startTime={start_ms}&limit=1")
-    data = fetch_url(url)
-    return float(data[0][1]) if data else None
+    for _ in range(retries):
+        data = fetch_url(url)
+        if data and int(data[0][0]) == start_ms:
+            return float(data[0][1])
+        time.sleep(retry_delay)
+    return None
 
 
 def fetch_btc5m_snapshot(

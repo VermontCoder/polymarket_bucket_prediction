@@ -270,8 +270,16 @@ def advance_to_next_market(state: AppState, client) -> None:
             state.up_token_id = up_token_id
             state.down_token_id = down_token_id
             state.fill = None
+            state.price_to_beat = None  # clear stale value; re-fetch below
             state.cumulative_pnl = _read_cumulative_pnl(state.run_log_path)
             state.status = Status.WAITING_FOR_ORDER
+
+        # Fetch the open price for the current window (with retry in case kline just opened)
+        threading.Thread(
+            target=_capture_price_to_beat,
+            args=(state, _window_start()),
+            daemon=True,
+        ).start()
         return
 
 
@@ -354,7 +362,20 @@ def run_data_thread(state: AppState, stop_event: threading.Event, client) -> Non
                     direction, ask_cents = signal
                     token_id = up_id if direction == "UP" else down_id
                     price = ask_cents / 100
-                    state.log(f"Signal: BUY {direction} at {price:.2f} (ask={ask_cents:.0f}c)")
+                    cp = snap.get("current_price")
+                    diff = snap.get("diff_pct")
+                    ttc = snap.get("time_to_close", 0)
+                    x = int(ttc) // 2000
+                    y = max(0, min(299, int(diff * 300 + 150))) if diff is not None else "?"
+                    bucket = (x, y)
+                    rate = smoothed_rates.get(bucket, "?")
+                    state.log(
+                        f"Signal: BUY {direction}  ask={ask_cents:.0f}c  "
+                        f"ptb={price_to_beat:.2f}  cp={cp:.2f}  diff={diff:+.3f}%  "
+                        f"bucket={bucket}  rate={rate:.3f}  thresh={state.threshold:.0f}%"
+                        if diff is not None and isinstance(rate, float)
+                        else f"Signal: BUY {direction} at {price:.2f} (ask={ask_cents:.0f}c)"
+                    )
                     with state.lock:
                         state.status = Status.ORDER_PLACED
                     threading.Thread(

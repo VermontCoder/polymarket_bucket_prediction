@@ -6,9 +6,12 @@ from market_data import fetch_open_price_for_window, fetch_btc5m_snapshot
 
 
 def test_fetch_open_price_for_window_returns_float():
-    kline_resp = [[0, "84000.50", "84100.00", "83900.00", "84050.00", "10.5", 0, "0", 0, "0", "0", "0"]]
+    window_start = 1775078400
+    # Binance kline[0][0] is open time in ms; must match window_start * 1000 exactly
+    kline_resp = [[window_start * 1000, "84000.50", "84100.00", "83900.00", "84050.00",
+                   "10.5", 0, "0", 0, "0", "0", "0"]]
     with patch("market_data.fetch_url", return_value=kline_resp):
-        price = fetch_open_price_for_window(window_start=1775078400, symbol="BTCUSDT")
+        price = fetch_open_price_for_window(window_start=window_start, symbol="BTCUSDT")
     assert price == 84000.50
 
 

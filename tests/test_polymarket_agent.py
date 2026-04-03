@@ -283,7 +283,7 @@ def test_run_data_thread_stores_snapshot_and_fires_signal():
         with state_.lock:
             state_.status = Status.WAITING_NEXT_MARKET
 
-    with patch("polymarket_agent.fetch_btc5m_snapshot", return_value=snap), \
+    with patch("polymarket_agent.fetch_5m_snapshot", return_value=snap), \
          patch("polymarket_agent.run_order_thread", side_effect=fake_order_thread):
         t = threading.Thread(target=run_data_thread, args=(state, stop, None), daemon=True)
         t.start()
@@ -363,7 +363,7 @@ def test_build_right_panel_truncates_to_height():
         log_lines=[f"line {i}" for i in range(50)],
         lock=threading.Lock(),
     )
-    panel = build_right_panel(state, panel_height=5)
+    panel = build_right_panel(state, panel_height=15)
     text = str(panel.renderable if hasattr(panel, 'renderable') else panel)
     assert "line 49" in text   # newest line present
     assert "line 0" not in text  # oldest line trimmed

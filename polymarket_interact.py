@@ -55,16 +55,16 @@ def _fetch_gamma_condition_id(slug: str) -> str | None:
     return market.get("conditionId") if market else None
 
 
-def find_active_btc_5min_market(client: ClobClient) -> tuple[dict, str] | None:
-    """Look up the current BTC 5-min market by computing its slug from the clock.
+def find_active_5min_market(client: ClobClient, slug_prefix: str) -> tuple[dict, str] | None:
+    """Look up the current 5-min market by computing its slug from the clock.
 
-    Slug format: btc-updown-5m-{epoch} where epoch is the UTC timestamp of the
+    Slug format: {slug_prefix}-{epoch} where epoch is the UTC timestamp of the
     start of the current 5-minute window (floored to nearest 300 seconds).
     Returns (clob_market_dict, slug), or None if not found or not yet active.
     """
     now = datetime.now(timezone.utc)
     window_start = (int(now.timestamp()) // 300) * 300
-    slug = f"btc-updown-5m-{window_start}"
+    slug = f"{slug_prefix}-{window_start}"
 
     condition_id = _fetch_gamma_condition_id(slug)
     if not condition_id:

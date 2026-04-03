@@ -14,12 +14,13 @@ from rich.text import Text
 
 from polymarket_interact import (
     build_client,
-    find_active_btc_5min_market,
+    find_active_5min_market,
     get_token_ids,
     place_order,
     poll_resolution,
 )
-from market_data import fetch_open_price_for_window, fetch_btc5m_snapshot
+from market_data import fetch_open_price_for_window, fetch_5m_snapshot
+from config import MARKET_CONFIG, parse_market_arg
 from signal_eval import evaluate_signal, load_smoothed_rates
 
 MAX_LOG_LINES = 200
@@ -48,6 +49,8 @@ class AppState:
     last_snapshot: dict | None = None
     threshold: float = 13.0
     manual: bool = False
+    slug_prefix: str = "btc-updown-5m"
+    binance_symbol: str = "BTCUSDT"
 
     def log(self, msg: str) -> None:
         with self.lock:
@@ -121,7 +124,7 @@ def build_right_panel(state: AppState, panel_height: int) -> Panel:
     with state.lock:
         lines = list(state.log_lines)
     height = panel_height if panel_height > 4 else 40  # fallback if console reports 0
-    visible_count = max(0, height - 4)  # account for panel border + title + padding
+    visible_count = max(0, height - 9)  # 4 for border/title/padding + 5-line bottom buffer
     visible = lines[-visible_count:] if visible_count > 0 else []
     t = Text("\n".join(f"> {line}" for line in visible))
     return Panel(t, title="LOG", border_style="cyan")
@@ -247,7 +250,7 @@ def advance_to_next_market(state: AppState, client) -> None:
     state.log("Looking up next market...")
     while True:
         try:
-            result = find_active_btc_5min_market(client)
+            result = find_active_5min_market(client, state.slug_prefix)
         except Exception as e:
             state.log(f"Error fetching market: {e} — retrying...")
             time.sleep(5)
@@ -343,11 +346,12 @@ def run_data_thread(state: AppState, stop_event: threading.Event, client) -> Non
             price_to_beat = state.price_to_beat
             smoothed_rates = state.smoothed_rates
             current_status = state.status
+            binance_symbol = state.binance_symbol
 
         if up_id and down_id and slug:
             window_end = _window_start() + 300
             try:
-                snap = fetch_btc5m_snapshot(up_id, down_id, window_end_epoch=window_end)
+                snap = fetch_5m_snapshot(up_id, down_id, window_end_epoch=window_end, symbol=binance_symbol)
                 if snap and price_to_beat is not None:
                     cp = snap.get("current_price")
                     if cp is not None:
@@ -397,7 +401,7 @@ def _window_start() -> int:
 def _capture_price_to_beat(state: AppState, window_start: int) -> None:
     """Fetch the Binance open price for the given window and store in state.price_to_beat."""
     try:
-        price = fetch_open_price_for_window(window_start)
+        price = fetch_open_price_for_window(window_start, symbol=state.binance_symbol)
     except Exception as e:
         state.log(f"Could not fetch open price: {e}")
         return
@@ -471,11 +475,16 @@ def run_ui_mode(state: AppState, client, stop_event: threading.Event) -> None:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("market", type=str.upper, choices=list(MARKET_CONFIG),
+                        help="Market to trade: BTC_5 or ETH_5 (case-insensitive)")
     parser.add_argument("--manual", action="store_true",
                         help="Manual mode: press 1/2 to buy UP/DOWN instead of auto-signal")
     parser.add_argument("--threshold", type=float, default=13.0,
                         help="Signal threshold: percent above ask required to place order (default: 13)")
     args = parser.parse_args()
+
+    market_key = args.market
+    cfg = MARKET_CONFIG[market_key]
 
     console = Console()
 
@@ -486,7 +495,7 @@ def main() -> None:
         return
 
     try:
-        smoothed_rates = load_smoothed_rates("data/smoothed_rates.json")
+        smoothed_rates = load_smoothed_rates(cfg["smoothed_rates_path"])
     except Exception as e:
         console.print(f"[red]Could not load smoothed rates:[/red] {e}")
         return
@@ -507,18 +516,20 @@ def main() -> None:
         smoothed_rates=smoothed_rates,
         threshold=args.threshold,
         manual=args.manual,
+        slug_prefix=cfg["slug_prefix"],
+        binance_symbol=cfg["binance_symbol"],
     )
 
     # Initial market fetch
-    state.log("Looking up active BTC 5-min market...")
+    state.log(f"Looking up active {market_key} market...")
     try:
-        result = find_active_btc_5min_market(client)
+        result = find_active_5min_market(client, state.slug_prefix)
     except Exception as e:
         console.print(f"[red]Error fetching market:[/red] {e}")
         return
 
     if result is None:
-        console.print("No active BTC 5-minute market found. Exiting.")
+        console.print(f"No active {market_key} market found. Exiting.")
         return
 
     market, slug = result

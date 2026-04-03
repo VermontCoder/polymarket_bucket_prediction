@@ -38,12 +38,13 @@ def fetch_open_price_for_window(window_start: int, symbol: str = "BTCUSDT",
     return None
 
 
-def fetch_btc5m_snapshot(
+def fetch_5m_snapshot(
     up_token_id: str,
     down_token_id: str,
     window_end_epoch: int,
+    symbol: str = "BTCUSDT",
 ) -> dict:
-    """Fetch current CLOB order books + Binance spot price for the BTC-5m market.
+    """Fetch current CLOB order books + Binance spot price for a 5-min market.
 
     Returns dict with keys: up_ask, down_ask (cents, 0-100), current_price,
     time_to_close (ms, computed from wall clock vs window end).
@@ -56,7 +57,7 @@ def fetch_btc5m_snapshot(
     books_list = fetch_post("https://clob.polymarket.com/books", body)
     books = {item["asset_id"]: item for item in books_list}
 
-    encoded = urllib.parse.quote(json.dumps(["BTCUSDT"], separators=(",", ":")))
+    encoded = urllib.parse.quote(json.dumps([symbol], separators=(",", ":")))
     price_data = fetch_url(f"https://api.binance.com/api/v3/ticker/price?symbols={encoded}")
     current_price = float(price_data[0]["price"]) if price_data else None
 

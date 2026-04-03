@@ -1,7 +1,9 @@
+import glob
 import random
 from dataclasses import dataclass
 
 from train import load_sessions, load_bucket_rates
+from config import MARKET_CONFIG, parse_market_arg
 
 
 @dataclass
@@ -182,7 +184,7 @@ def _run_all(sessions: list, smoothed_rates: dict, threshold: float) -> list:
 
 
 def print_sweep_table(train_sessions: list, test_sessions: list, smoothed_rates: dict) -> None:
-    """Run thresholds 5–15 over both datasets and print a summary table."""
+    """Run thresholds 5–20 over both datasets and print a summary table."""
     col = 14  # column width for each metric cell
     header = (
         f"{'':>12} | "
@@ -200,7 +202,7 @@ def print_sweep_table(train_sessions: list, test_sessions: list, smoothed_rates:
     print(subheader)
     print(divider)
 
-    for t in range(5, 16):
+    for t in range(5, 21):
         train_r = _run_all(train_sessions, smoothed_rates, t)
         test_r = _run_all(test_sessions, smoothed_rates, t)
 
@@ -220,31 +222,45 @@ def print_sweep_table(train_sessions: list, test_sessions: list, smoothed_rates:
         )
 
 
-TRAIN_DATA = "data/btc_5_combined_20260402_165038_train.json"
-TEST_DATA = "data/btc_5_combined_20260402_165038_test.json"
-SMOOTHED_RATES_CACHE = "data/smoothed_rates.json"
-TRADE_LOG_PATH = "data/trade_log.txt"
-
 if __name__ == "__main__":
-    import sys
-    smoothed_rates = load_bucket_rates(SMOOTHED_RATES_CACHE)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("market", type=parse_market_arg,
+                        help="Market to evaluate: BTC_5 or ETH_5 (case-insensitive)")
+    parser.add_argument("--sweep", action="store_true",
+                        help="Run threshold sweep over train and test sets")
+    args = parser.parse_args()
 
-    if "--sweep" in sys.argv:
+    cfg = MARKET_CONFIG[args.market]
+    prefix = cfg["file_prefix"]
+
+    train_files = sorted(glob.glob(f"data/{prefix}_*_train.json"))
+    test_files  = sorted(glob.glob(f"data/{prefix}_*_test.json"))
+    if not train_files or not test_files:
+        print(f"No data files found for market '{args.market}' in data/. Exiting.")
+        raise SystemExit(1)
+    train_path = train_files[-1]
+    test_path  = test_files[-1]
+    trade_log_path = f"data/{prefix}_trade_log.txt"
+
+    smoothed_rates = load_bucket_rates(cfg["smoothed_rates_path"])
+
+    if args.sweep:
         print("Loading train and test sessions...")
-        train_sessions = load_sessions(TRAIN_DATA)
-        test_sessions = load_sessions(TEST_DATA)
+        train_sessions = load_sessions(train_path)
+        test_sessions  = load_sessions(test_path)
         print(f"Train: {len(train_sessions)} sessions  |  Test: {len(test_sessions)} sessions")
         print()
         print_sweep_table(train_sessions, test_sessions, smoothed_rates)
     else:
-        sessions = load_sessions(TEST_DATA)
+        sessions = load_sessions(test_path)
         print(f"Test sessions loaded:  {len(sessions)}")
         print()
 
         results = _run_all(sessions, smoothed_rates, threshold=10)
 
         print_trade_log(results)
-        save_trade_log(results, TRADE_LOG_PATH)
-        print(f"Trade log saved to {TRADE_LOG_PATH}")
+        save_trade_log(results, trade_log_path)
+        print(f"Trade log saved to {trade_log_path}")
         print()
         print_summary(results, total_sessions=len(sessions))

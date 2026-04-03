@@ -4,6 +4,7 @@ import random
 from datetime import datetime, timezone, timedelta
 from session import Session
 from visualizer import plot_bucket_predict_rates
+from config import MARKET_CONFIG, parse_market_arg
 
 
 def load_sessions(filepath: str) -> list[Session]:
@@ -53,8 +54,7 @@ def smooth_bucket_rates(bucket_rates: dict) -> dict:
     return smoothed
 
 
-BUCKET_RATES_CACHE = "data/bucket_rates.json"
-SMOOTHED_RATES_CACHE = "data/smoothed_rates.json"
+# Cache paths are now derived from the market arg at runtime.
 
 
 def split_unsplit_files() -> list[str]:
@@ -111,16 +111,22 @@ def find_train_files() -> list[str]:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("market", type=parse_market_arg,
+                        help="Market to train: BTC_5 or ETH_5 (case-insensitive)")
     parser.add_argument("--days", type=int, default=None,
                         help="Only use sessions from the last N days (default: all)")
     args = parser.parse_args()
+
+    cfg = MARKET_CONFIG[args.market]
+    file_prefix = cfg["file_prefix"]
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)) if args.days else None
 
     # Split any unsplit JSON files first
     split_unsplit_files()
 
-    train_files = find_train_files()
+    train_files = [f for f in find_train_files()
+                   if os.path.basename(f).startswith(file_prefix + "_")]
     if not train_files:
         print("No _train.json files found in data/. Exiting.")
         raise SystemExit(1)
@@ -147,8 +153,8 @@ if __name__ == "__main__":
     smoothed_rates = smooth_bucket_rates(bucket_rates)
     print(f"Distinct buckets:  {len(bucket_rates)}")
 
-    save_bucket_rates(bucket_rates, BUCKET_RATES_CACHE)
-    save_bucket_rates(smoothed_rates, SMOOTHED_RATES_CACHE)
+    save_bucket_rates(bucket_rates, cfg["bucket_rates_path"])
+    save_bucket_rates(smoothed_rates, cfg["smoothed_rates_path"])
     print("Bucket rates saved to cache.")
     print()
 

@@ -13,8 +13,8 @@ def _market(question, active=True, closed=False, minutes_from_now=3):
         "closed": closed,
         "end_date_iso": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tokens": [
-            {"token_id": "111", "outcome": "Yes", "price": 0.54, "winner": False},
-            {"token_id": "222", "outcome": "No",  "price": 0.46, "winner": False},
+            {"token_id": "111", "outcome": "Up",  "price": 0.54, "winner": False},
+            {"token_id": "222", "outcome": "Down", "price": 0.46, "winner": False},
         ],
     }
 
@@ -61,32 +61,32 @@ def test_get_token_ids_raises_if_missing():
 
 
 def test_calc_avg_fill_price_single_trade():
-    from polymarket_agent import calc_avg_fill_price
+    from polymarket_interact import calc_avg_fill_price
     trades = [{"price": "0.54", "size": "4.962"}]
     assert abs(calc_avg_fill_price(trades) - 0.54) < 0.0001
 
 
 def test_calc_avg_fill_price_weighted():
-    from polymarket_agent import calc_avg_fill_price
+    from polymarket_interact import calc_avg_fill_price
     # (0.50*2 + 0.60*3) / 5 = 0.56
     trades = [{"price": "0.50", "size": "2.0"}, {"price": "0.60", "size": "3.0"}]
     assert abs(calc_avg_fill_price(trades) - 0.56) < 0.0001
 
 
 def test_calc_avg_fill_price_empty_returns_none():
-    from polymarket_agent import calc_avg_fill_price
+    from polymarket_interact import calc_avg_fill_price
     assert calc_avg_fill_price([]) is None
 
 
 def test_calc_pnl_win():
-    from polymarket_agent import calc_pnl
+    from polymarket_interact import calc_pnl
     payout, pnl = calc_pnl(shares=4.962, cost=2.69, won=True)
     assert abs(payout - 4.962) < 0.001
     assert abs(pnl - 2.272) < 0.001
 
 
 def test_calc_pnl_loss():
-    from polymarket_agent import calc_pnl
+    from polymarket_interact import calc_pnl
     payout, pnl = calc_pnl(shares=4.962, cost=2.69, won=False)
     assert payout == 0.0
     assert abs(pnl - (-2.69)) < 0.001

@@ -61,55 +61,57 @@ def build_left_panel(state: AppState, seconds_remaining: float) -> Panel:
     countdown = format_countdown(int(seconds_remaining))
     t = Text()
 
-    if state.status == Status.WAITING_NEXT_MARKET:
-        t.append("Waiting for next market window...\n\n", style="bold yellow")
-        t.append(f"Next window in: {countdown}", style="cyan")
-    else:
-        question = state.market.get("question", "") if state.market else ""
-        t.append(f"{question}\n", style="bold white")
-        t.append(f"{state.slug or ''}\n\n", style="dim")
-        t.append(f"Closes in: {countdown}\n\n", style="cyan")
+    # Always show market identity and countdown
+    question = state.market.get("question", "") if state.market else ""
+    t.append(f"{question}\n", style="bold white")
+    t.append(f"{state.slug or ''}\n\n", style="dim")
+    t.append(f"Closes in: {countdown}\n\n", style="cyan")
 
-        # Always show live price data when available
-        if state.price_to_beat is not None:
-            t.append(f"Price to beat: {state.price_to_beat:.2f}\n", style="dim")
-        if state.last_snapshot is not None:
-            snap = state.last_snapshot
-            cp = snap.get("current_price")
-            ua = snap.get("up_ask")
-            da = snap.get("down_ask")
-            diff = snap.get("diff_pct")
-            if cp is not None:
-                t.append(f"Current price: {cp:.2f}\n", style="white")
-            if diff is not None:
-                diff_style = "green" if diff >= 0 else "red"
-                t.append(f"Diff: {diff:+.4f}%\n", style=diff_style)
-            if ua is not None and da is not None:
-                t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
-        t.append("\n")
+    # Always show live price data when available
+    if state.price_to_beat is not None:
+        t.append(f"Price to beat: {state.price_to_beat:.2f}\n", style="dim")
+    if state.last_snapshot is not None:
+        snap = state.last_snapshot
+        cp = snap.get("current_price")
+        ua = snap.get("up_ask")
+        da = snap.get("down_ask")
+        diff = snap.get("diff_pct")
+        if cp is not None:
+            t.append(f"Current price: {cp:.2f}\n", style="white")
+        if diff is not None:
+            diff_style = "green" if diff >= 0 else "red"
+            t.append(f"Diff: {diff:+.4f}%\n", style=diff_style)
+        if ua is not None and da is not None:
+            t.append(f"Up ask: {ua:.0f}c  Down ask: {da:.0f}c\n", style="dim")
+    t.append("\n")
 
-        if state.status == Status.WAITING_FOR_ORDER:
-            pnl = state.cumulative_pnl
-            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-            pnl_style = "green" if pnl >= 0 else "red"
-            t.append(f"Run P&L: {pnl_str}\n\n", style=pnl_style)
+    # Status-specific bottom section
+    if state.status == Status.WAITING_FOR_ORDER:
+        pnl = state.cumulative_pnl
+        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+        pnl_style = "green" if pnl >= 0 else "red"
+        t.append(f"Run P&L: {pnl_str}\n\n", style=pnl_style)
 
-            if state.manual:
-                t.append("[1] Buy UP\n", style="green")
-                t.append("[2] Buy DOWN\n", style="red")
-                t.append("[X] Exit\n\n", style="dim")
-                t.append("Press a key...", style="italic dim")
-            else:
-                t.append("Auto mode — signal will fire automatically\n\n", style="italic dim")
-                t.append("[X] Exit", style="dim")
+        if state.manual:
+            t.append("[1] Buy UP\n", style="green")
+            t.append("[2] Buy DOWN\n", style="red")
+            t.append("[X] Exit\n\n", style="dim")
+            t.append("Press a key...", style="italic dim")
+        else:
+            t.append("Auto mode — signal will fire automatically\n\n", style="italic dim")
+            t.append("[X] Exit", style="dim")
 
-        elif state.status == Status.ORDER_PLACED:
-            if state.fill:
-                side = state.fill.get("side_label", "?")
-                cost = state.fill.get("cost", 0.0)
-                t.append(f"Bought {side} at ${cost:.2f} — waiting for market close\n\n",
-                         style="bold green")
-            t.append("[X] Exit\n", style="dim")
+    elif state.status == Status.ORDER_PLACED:
+        if state.fill:
+            side = state.fill.get("side_label", "?")
+            cost = state.fill.get("cost", 0.0)
+            t.append(f"Bought {side} at ${cost:.2f} — waiting for market close\n\n",
+                     style="bold green")
+        t.append("[X] Exit\n", style="dim")
+
+    elif state.status == Status.WAITING_NEXT_MARKET:
+        t.append("Advancing to next market...\n\n", style="bold yellow")
+        t.append("[X] Exit\n", style="dim")
 
     return Panel(t, title="ACTIVE MARKET", border_style="blue")
 
@@ -118,7 +120,8 @@ def build_right_panel(state: AppState, panel_height: int) -> Panel:
     """Build the right Rich Panel showing the action log."""
     with state.lock:
         lines = list(state.log_lines)
-    visible_count = max(0, panel_height - 2)
+    height = panel_height if panel_height > 4 else 40  # fallback if console reports 0
+    visible_count = max(0, height - 4)  # account for panel border + title + padding
     visible = lines[-visible_count:] if visible_count > 0 else []
     t = Text("\n".join(f"> {line}" for line in visible))
     return Panel(t, title="LOG", border_style="cyan")
@@ -428,7 +431,7 @@ def run_ui_mode(state: AppState, client, stop_event: threading.Event) -> None:
     _advance_pending = False
     _price_capture_pending = False
 
-    with Live(layout, console=console, refresh_per_second=0.5, screen=True):
+    with Live(layout, console=console, refresh_per_second=2, screen=True):
         while not stop_event.is_set():
             seconds_remaining = seconds_until_next_five_min_interval()
             panel_height = console.height
@@ -462,7 +465,7 @@ def run_ui_mode(state: AppState, client, stop_event: threading.Event) -> None:
                 _advance_pending = False
                 _price_capture_pending = False
 
-            time.sleep(2)
+            time.sleep(0.5)
 
 
 def main() -> None:
